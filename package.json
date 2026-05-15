@@ -1,0 +1,15 @@
+{
+  "name": "facebook-embed-provider",
+  "version": "0.1.0",
+  "description": "Pure JS Facebook embed provider for messaging apps, deployable to Cloudflare Pages.",
+  "main": "public/index.js",
+  "scripts": {
+    "dev": "wrangler pages dev ./public --compatibility-date=2024-05-12",
+    "deploy": "wrangler pages publish ./public"
+  },
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {},
+  "devDependencies": {}
+}
