@@ -28,6 +28,32 @@ export async function onRequest(context) {
     error = e;
   }
 
+  let og = {};
+  let error = null;
+  try {
+    const fbRes = await fetch(fbUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const fbHtml = await fbRes.text();
+    const ogTag = (name) => {
+      const regex = new RegExp(`<meta[^>]+property=["']og:${name}["'][^>]+content=["']([^"']+)["']`, 'i');
+      const match = fbHtml.match(regex);
+      return match ? match[1] : null;
+    };
+    og.title = ogTag('title') || 'Facebook Post';
+    og.description = ogTag('description') || '';
+    og.image = ogTag('image') || fallbackImage;
+    og.video = ogTag('video') || null;
+
+    // Try to extract direct video URL from embedded JSON if og:video is not found
+    if (!og.video) {
+      const videoDataMatch = fbHtml.match(/"playable_url":"(https:[^\"]+\.mp4)"/);
+      if (videoDataMatch) {
+        og.video = videoDataMatch[1].replace(/\\u0025/g, '%').replace(/\\/g, '');
+      }
+    }
+  } catch (e) {
+    error = e;
+  }
+
   if (error || !og.title) {
     og = {
       title: 'Post unavailable',
@@ -46,14 +72,14 @@ export async function onRequest(context) {
     metaTags += `\n    <meta property="og:video" content="${og.video}" />`;
   }
 
-  const html = `<!DOCTYPE html>
+  const htmlOut = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <title>${og.title}</title>
   ${metaTags}
 </head>
-<body>
+
   <h2>${og.title}</h2>
   <p>${og.description}</p>
   <img src="${og.image}" alt="Post image" style="max-width:400px;display:block;" />
@@ -62,34 +88,6 @@ export async function onRequest(context) {
 </body>
 </html>`;
 
-  return new Response(html, { headers: { 'Content-Type': 'text/html' } });
-  const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>${og.title}</title>
-  ${metaTags}
-</head>
-<body>
-  <h2>${og.title}</h2>
-  <p>${og.description}</p>
-  <img src="${og.image}" alt="Post image" style="max-width:400px;display:block;" />
-  ${og.video ? `<video src="${og.video}" controls style="max-width:400px;display:block;"></video>` : ''}
-</body>
-</html>`;
-
-  return new Response(html, { headers: { 'Content-Type': 'text/html' } });
-  <meta charset="UTF-8">
-  <title>${og.title}</title>
-  ${metaTags}
-</head>
-<body>
-  <h2>${og.title}</h2>
-  <p>${og.description}</p>
-  <img src="${og.image}" alt="Post image" style="max-width:400px;display:block;" />
-  ${og.video ? `<video src="${og.video}" controls style="max-width:400px;display:block;"></video>` : ''}
-</body>
-</html>`;
-
+  return new Response(htmlOut, { headers: { 'Content-Type': 'text/html' } });
   return new Response(html, { headers: { 'Content-Type': 'text/html' } });
 }
