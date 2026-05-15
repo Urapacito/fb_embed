@@ -1,1 +1,1 @@
-It works like it works
+It works like you hope it works
