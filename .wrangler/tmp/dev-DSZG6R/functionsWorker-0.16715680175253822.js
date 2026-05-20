@@ -729,6 +729,23 @@ async function onRequest4(context) {
     og.description = ogTag("description") || "";
     const primaryImage = ogTag("image") || ogTag("image:url") || fallbackImage;
     if (primaryImage) og.images.push(primaryImage);
+    const ogVideoMeta = ogTag("video") || ogTag("video:url") || ogTag("video:secure_url") || ogTag("video:video");
+    if (ogVideoMeta) {
+      og.video = normalize(ogVideoMeta).replace(/\\u0025/g, "%").replace(/\\/g, "");
+    }
+    if (!og.video) {
+      const rawMp4 = (fbHtml.match(/https?:\/\/[^\s"']+?\.mp4/gi) || [])[0];
+      if (rawMp4) {
+        og.video = normalize(rawMp4);
+      } else {
+        const playMatch = fbHtml.match(/playable_url[^:]*:\s*["']([^"']+?\.mp4[^"']*)/i);
+        if (playMatch && playMatch[1]) og.video = normalize(playMatch[1]);
+        const srcMatch = fbHtml.match(/"src"\s*:\s*"([^"]+?\.mp4[^"]*)/i);
+        if (!og.video && srcMatch && srcMatch[1]) og.video = normalize(srcMatch[1]);
+        const escapedPlay = fbHtml.match(/playable_url\\\":\\\"([^\\\"]+?\.mp4[^\\\"]*)/i);
+        if (!og.video && escapedPlay && escapedPlay[1]) og.video = normalize(escapedPlay[1].replace(/\\\\/g, "\\"));
+      }
+    }
     const jsonObjects = [];
     const scriptRe = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
     let sm;
@@ -832,6 +849,52 @@ async function onRequest4(context) {
     }
     og.images = Array.from(imageSet);
     if (og.images.length === 0) og.images.push(primaryImage || fallbackImage);
+    if (!og.video) {
+      try {
+        const mobileUrl = resolvedUrl.replace("www.facebook.com", "m.facebook.com");
+        const mRes = await fetch(mobileUrl, { headers: { "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X)" } });
+        if (mRes && mRes.ok) {
+          const mHtml = await mRes.text();
+          const rawMp4 = (mHtml.match(/https?:\/\/[^\s"']+?\.mp4/gi) || [])[0];
+          if (rawMp4) og.video = normalize(rawMp4);
+          else {
+            const redirectMatch = mHtml.match(/video_redirect\/?\?src=([^"'&>]+)/i) || mHtml.match(/video_redirect\/\?src=([^"'&>]+)/i);
+            if (redirectMatch && redirectMatch[1]) {
+              try {
+                const decoded = decodeURIComponent(redirectMatch[1]);
+                og.video = normalize(decoded);
+              } catch (e) {
+                og.video = normalize(redirectMatch[1]);
+              }
+            }
+          }
+        }
+      } catch (e) {
+      }
+      if (!og.video) {
+        try {
+          const mbasicUrl = resolvedUrl.replace("www.facebook.com", "mbasic.facebook.com");
+          const bRes = await fetch(mbasicUrl, { headers: { "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X)" } });
+          if (bRes && bRes.ok) {
+            const bHtml = await bRes.text();
+            const rawMp4b = (bHtml.match(/https?:\/\/[^\s"']+?\.mp4/gi) || [])[0];
+            if (rawMp4b) og.video = normalize(rawMp4b);
+            else {
+              const redirectMatch = bHtml.match(/video_redirect\/\?src=([^"'&>]+)/i);
+              if (redirectMatch && redirectMatch[1]) {
+                try {
+                  const decoded = decodeURIComponent(redirectMatch[1]);
+                  og.video = normalize(decoded);
+                } catch (e) {
+                  og.video = normalize(redirectMatch[1]);
+                }
+              }
+            }
+          }
+        } catch (e) {
+        }
+      }
+    }
   } catch (e) {
     error = e;
   }
