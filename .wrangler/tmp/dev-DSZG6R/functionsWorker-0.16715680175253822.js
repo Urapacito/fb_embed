@@ -1,7 +1,7 @@
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
-// .wrangler/tmp/bundle-BydjTw/checked-fetch.js
+// .wrangler/tmp/bundle-jGpGlI/checked-fetch.js
 var urls = /* @__PURE__ */ new Set();
 function checkURL(request, init) {
   const url = request instanceof URL ? request : new URL(
@@ -27,7 +27,7 @@ globalThis.fetch = new Proxy(globalThis.fetch, {
   }
 });
 
-// .wrangler/tmp/pages-igDQ3e/functionsWorker-0.31180737945961545.mjs
+// .wrangler/tmp/pages-gA9neX/functionsWorker-0.16715680175253822.mjs
 var __defProp2 = Object.defineProperty;
 var __name2 = /* @__PURE__ */ __name((target, value) => __defProp2(target, "name", { value, configurable: true }), "__name");
 var urls2 = /* @__PURE__ */ new Set();
@@ -83,20 +83,202 @@ async function onRequest(context) {
     og.video = ogTag("video") || ogTag("video:secure_url") || ogTag("video:url") || null;
     if (!og.video) {
       const patterns = [
-        /"playable_url":"(https:[^\\"]+?\\.mp4)"/,
-        /"playable_url_quality_hd":"(https:[^\\"]+?\\.mp4)"/,
-        /"hd_src_no_ratelimit":"(https:[^\\"]+?\\.mp4)"/,
-        /"hd_src":"(https:[^\\"]+?\\.mp4)"/,
-        /"sd_src_no_ratelimit":"(https:[^\\"]+?\\.mp4)"/,
-        /"sd_src":"(https:[^\\"]+?\\.mp4)"/,
-        /source\s*:\s*\"(https:[^\\"]+?\\.mp4)\"/
+        /"playable_url":"(https:[^\"]+?\.mp4)"/,
+        /"playable_url_quality_hd":"(https:[^\"]+?\.mp4)"/,
+        /"hd_src_no_ratelimit":"(https:[^\"]+?\.mp4)"/,
+        /"hd_src":"(https:[^\"]+?\.mp4)"/,
+        /"sd_src_no_ratelimit":"(https:[^\"]+?\.mp4)"/,
+        /"sd_src":"(https:[^\"]+?\.mp4)"/,
+        /https?:\/\/[^\s"']+?\.mp4/gi
       ];
       for (const p of patterns) {
         const m = fbHtml.match(p);
         if (m) {
-          og.video = m[1].replace(/\\u0025/g, "%").replace(/\\/g, "");
+          og.video = m[1] ? m[1].replace(/\\u0025/g, "%").replace(/\\/g, "") : m[0].replace(/\\u0025/g, "%").replace(/\\/g, "");
           break;
         }
+      }
+      if (!og.video) {
+        let normalize = /* @__PURE__ */ __name(function(s) {
+          if (!s) return s;
+          return s.replace(/\\u0025/g, "%").replace(/\\\//g, "/").replace(/\\\\/g, "\\\\").replace(/\\/g, "");
+        }, "normalize"), searchByPriority = /* @__PURE__ */ __name(function(node, keys) {
+          if (!node) return null;
+          if (typeof node === "string") {
+            const cleaned = normalize(node);
+            const m = cleaned.match(/https?:\/\/[^\s\"']+?\.mp4/i);
+            return m ? m[0] : null;
+          }
+          if (typeof node === "object") {
+            if (Array.isArray(node)) {
+              for (const it of node) {
+                const r = searchByPriority(it, keys);
+                if (r) return r;
+              }
+            } else {
+              for (const k of Object.keys(node)) {
+                try {
+                  if (keys.includes(k) && typeof node[k] === "string") {
+                    const cleaned = normalize(node[k]);
+                    const m = cleaned.match(/https?:\/\/[^\s\"']+?\.mp4/i);
+                    if (m) return m[0];
+                  }
+                } catch (e) {
+                }
+              }
+              for (const k of Object.keys(node)) {
+                try {
+                  const r = searchByPriority(node[k], keys);
+                  if (r) return r;
+                } catch (e) {
+                }
+              }
+            }
+          }
+          return null;
+        }, "searchByPriority"), deepSearch = /* @__PURE__ */ __name(function(node) {
+          if (!node) return null;
+          if (typeof node === "string") {
+            const cleaned = normalize(node);
+            const m = cleaned.match(/https?:\/\/[^\s"']+?\.mp4/i);
+            return m ? m[0] : null;
+          }
+          if (typeof node === "object") {
+            if (Array.isArray(node)) {
+              for (const it of node) {
+                const r = deepSearch(it);
+                if (r) return r;
+              }
+            } else {
+              for (const k of Object.keys(node)) {
+                try {
+                  const v = node[k];
+                  if (typeof v === "string") {
+                    const cleaned = normalize(v);
+                    const m = cleaned.match(/https?:\/\/[^\s"']+?\.mp4/i);
+                    if (m) return m[0];
+                  } else if (typeof v === "object") {
+                    const r = deepSearch(v);
+                    if (r) return r;
+                  }
+                } catch (e) {
+                }
+              }
+            }
+          }
+          return null;
+        }, "deepSearch");
+        __name2(normalize, "normalize");
+        __name2(searchByPriority, "searchByPriority");
+        __name2(deepSearch, "deepSearch");
+        const jsonObjects = [];
+        const scriptRe = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
+        let sm;
+        while ((sm = scriptRe.exec(fbHtml)) !== null) {
+          const txt = (sm[1] || "").trim();
+          if (!txt) continue;
+          try {
+            if (txt[0] === "{" || txt[0] === "[") {
+              jsonObjects.push(JSON.parse(txt));
+              continue;
+            }
+            const assignMatch = txt.match(/=\s*({[\s\S]*})\s*;?$/m);
+            if (assignMatch) {
+              jsonObjects.push(JSON.parse(assignMatch[1]));
+              continue;
+            }
+            const jp = txt.match(/JSON\.parse\((?:'|")([\s\S]*)(?:'|")\)/m);
+            if (jp) {
+              const candidate = jp[1].replace(/\\n/g, "").replace(/\\'/g, "'");
+              jsonObjects.push(JSON.parse(candidate));
+              continue;
+            }
+          } catch (e) {
+          }
+        }
+        const reelPriorityKeys = [
+          "browser_native_hd_url",
+          "browser_native_sd_url",
+          "browser_native_sd_url",
+          "videoDeliveryLegacyFields",
+          "short_form_video_context",
+          "video_links",
+          "video_link",
+          "playable_url",
+          "playable_url_quality_hd",
+          "hd_src",
+          "sd_src",
+          "source"
+        ];
+        for (const obj of jsonObjects) {
+          try {
+            const found = deepSearch(obj);
+            if (found) {
+              og.video = found;
+              break;
+            }
+          } catch (e) {
+          }
+        }
+        if (!og.video) {
+          try {
+            const mobileUrl = fbUrl.replace("https://www.facebook.com", "https://m.facebook.com");
+            const mRes = await fetch(mobileUrl, { headers: { "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 13_5 like Mac OS X)" } });
+            if (mRes.ok) {
+              const mHtml = await mRes.text();
+              for (const p of patterns) {
+                const mm = mHtml.match(p);
+                if (mm) {
+                  og.video = mm[1] ? mm[1].replace(/\\u0025/g, "%").replace(/\\/g, "") : mm[0].replace(/\\u0025/g, "%").replace(/\\/g, "");
+                  break;
+                }
+              }
+              if (!og.video) {
+                let mJsons = [];
+                let s;
+                while ((s = scriptRe.exec(mHtml)) !== null) {
+                  const t = (s[1] || "").trim();
+                  if (!t) continue;
+                  try {
+                    if (t[0] === "{" || t[0] === "[") mJsons.push(JSON.parse(t));
+                  } catch (e) {
+                  }
+                }
+                for (const o of mJsons) {
+                  const f = deepSearch(o);
+                  if (f) {
+                    og.video = f;
+                    break;
+                  }
+                }
+              }
+            }
+          } catch (e) {
+          }
+        }
+      }
+    }
+    if (!og.video && context && context.env && context.env.FB_ACCESS_TOKEN) {
+      try {
+        const token = context.env.FB_ACCESS_TOKEN;
+        let videoId = null;
+        const m1 = fbHtml.match(/\/videos\/(\d+)/);
+        if (m1) videoId = m1[1];
+        if (!videoId) {
+          const m2 = fbHtml.match(/"video_id"\s*:\s*"?(\d+)"?/i) || fbHtml.match(/"videoId"\s*:\s*"?(\d+)"?/i);
+          if (m2) videoId = m2[1];
+        }
+        if (videoId) {
+          try {
+            const gRes = await fetch(`https://graph.facebook.com/v17.0/${videoId}?fields=source&access_token=${token}`);
+            if (gRes.ok) {
+              const j = await gRes.json();
+              if (j && j.source) og.video = j.source;
+            }
+          } catch (e) {
+          }
+        }
+      } catch (e) {
       }
     }
   } catch (e) {
@@ -110,12 +292,19 @@ async function onRequest(context) {
       video: null
     };
   }
-  const metaTags = [`
-		<meta property="og:title" content="${escapeHtml(og.title)}" />
-		<meta property="og:description" content="${escapeHtml(og.description)}
-Watch on Facebook: ${fbUrl}" />
-		<meta property="og:image" content="${og.image}" />
-	`, og.video ? `<meta property="og:video" content="${og.video}" />` : ""].join("\n");
+  const metaParts = [
+    `<meta property="og:title" content="${escapeHtml(og.title)}" />`,
+    `<meta property="og:description" content="${escapeHtml(og.description)}
+Watch on Facebook: ${fbUrl}" />`,
+    `<meta property="og:image" content="${og.image}" />`
+  ];
+  if (og.video) {
+    metaParts.push(`<meta property="og:video" content="${og.video}" />`);
+    metaParts.push(`<meta property="og:video:secure_url" content="${og.video}" />`);
+    metaParts.push(`<meta property="og:video:type" content="video/mp4" />`);
+    metaParts.push(`<meta name="twitter:card" content="player" />`);
+  }
+  const metaTags = metaParts.join("\n	");
   const htmlOut = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -143,6 +332,278 @@ __name(escapeHtml, "escapeHtml");
 __name2(escapeHtml, "escapeHtml");
 async function onRequest2(context) {
   const { request } = context;
+  const reqUrl = new URL(request.url);
+  const pathname = reqUrl.pathname;
+  const search = reqUrl.search || "";
+  const fbUrl = `https://www.facebook.com${pathname}${search}`;
+  const ua = (request.headers.get("user-agent") || "").toLowerCase();
+  const botRe = /discord|bot|slack|twitter|facebookexternalhit|facebook|facebot|embed|crawler|spider|preview|vkshare|whatsapp|telegram|linkedin|skype|curl|wget|python|node|cfnetwork|okhttp|libwww|java|go-http/;
+  const isBot = botRe.test(ua);
+  if (!isBot) return Response.redirect(fbUrl, 302);
+  const fallbackImage = "https://fb-embed.pages.dev/image-not-found.png";
+  let og = { title: null, description: null, image: null, video: null };
+  let error = null;
+  try {
+    const fbRes = await fetch(fbUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
+    if (!fbRes.ok) throw new Error(`fetch failed: ${fbRes.status}`);
+    const fbHtml = await fbRes.text();
+    const ogTag = /* @__PURE__ */ __name2((name) => {
+      const regex = new RegExp(`<meta[^>]+property=["']og:${name}["'][^>]+content=["']([^"']+)["']`, "i");
+      const match2 = fbHtml.match(regex);
+      return match2 ? match2[1] : null;
+    }, "ogTag");
+    og.title = ogTag("title") || ogTag("site_name") || "Facebook Post";
+    og.description = ogTag("description") || "";
+    og.image = ogTag("image") || ogTag("image:url") || fallbackImage;
+    og.video = ogTag("video") || ogTag("video:secure_url") || ogTag("video:url") || null;
+    if (!og.video) {
+      const patterns = [
+        /"playable_url":"(https:[^\\"]+?\.mp4)"/,
+        /"playable_url_quality_hd":"(https:[^\\"]+?\.mp4)"/,
+        /"hd_src_no_ratelimit":"(https:[^\\"]+?\.mp4)"/,
+        /"hd_src":"(https:[^\\"]+?\.mp4)"/,
+        /"sd_src_no_ratelimit":"(https:[^\\"]+?\.mp4)"/,
+        /"sd_src":"(https:[^\\"]+?\.mp4)"/,
+        /https?:\/\/[^\s"']+?\.mp4/gi
+      ];
+      for (const p of patterns) {
+        const m = fbHtml.match(p);
+        if (m) {
+          og.video = m[1] ? m[1].replace(/\\u0025/g, "%").replace(/\\/g, "") : m[0].replace(/\\u0025/g, "%").replace(/\\/g, "");
+          break;
+        }
+      }
+      if (!og.video) {
+        let normalize = /* @__PURE__ */ __name(function(s) {
+          if (!s) return s;
+          return s.replace(/\\u0025/g, "%").replace(/\\\//g, "/").replace(/\\\\/g, "\\\\").replace(/\\/g, "");
+        }, "normalize"), searchByPriority = /* @__PURE__ */ __name(function(node, keys) {
+          if (!node) return null;
+          if (typeof node === "string") {
+            const cleaned = normalize(node);
+            const m = cleaned.match(/https?:\/\/[^\s\"']+?\.mp4/i);
+            return m ? m[0] : null;
+          }
+          if (typeof node === "object") {
+            if (Array.isArray(node)) {
+              for (const it of node) {
+                const r = searchByPriority(it, keys);
+                if (r) return r;
+              }
+            } else {
+              for (const k of Object.keys(node)) {
+                try {
+                  if (keys.includes(k) && typeof node[k] === "string") {
+                    const cleaned = normalize(node[k]);
+                    const m = cleaned.match(/https?:\/\/[^\s\"']+?\.mp4/i);
+                    if (m) return m[0];
+                  }
+                } catch (e) {
+                }
+              }
+              for (const k of Object.keys(node)) {
+                try {
+                  const r = searchByPriority(node[k], keys);
+                  if (r) return r;
+                } catch (e) {
+                }
+              }
+            }
+          }
+          return null;
+        }, "searchByPriority"), deepSearch = /* @__PURE__ */ __name(function(node) {
+          if (!node) return null;
+          if (typeof node === "string") {
+            const cleaned = normalize(node);
+            const m = cleaned.match(/https?:\/\/[^\s"']+?\.mp4/i);
+            return m ? m[0] : null;
+          }
+          if (typeof node === "object") {
+            if (Array.isArray(node)) {
+              for (const it of node) {
+                const r = deepSearch(it);
+                if (r) return r;
+              }
+            } else {
+              for (const k of Object.keys(node)) {
+                try {
+                  const v = node[k];
+                  if (typeof v === "string") {
+                    const cleaned = normalize(v);
+                    const m = cleaned.match(/https?:\/\/[^\s"']+?\.mp4/i);
+                    if (m) return m[0];
+                  } else if (typeof v === "object") {
+                    const r = deepSearch(v);
+                    if (r) return r;
+                  }
+                } catch (e) {
+                }
+              }
+            }
+          }
+          return null;
+        }, "deepSearch");
+        __name2(normalize, "normalize");
+        __name2(searchByPriority, "searchByPriority");
+        __name2(deepSearch, "deepSearch");
+        const jsonObjects = [];
+        const scriptRe = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
+        let sm;
+        while ((sm = scriptRe.exec(fbHtml)) !== null) {
+          const txt = (sm[1] || "").trim();
+          if (!txt) continue;
+          try {
+            if (txt[0] === "{" || txt[0] === "[") {
+              jsonObjects.push(JSON.parse(txt));
+              continue;
+            }
+            const assignMatch = txt.match(/=\s*({[\s\S]*})\s*;?$/m);
+            if (assignMatch) {
+              jsonObjects.push(JSON.parse(assignMatch[1]));
+              continue;
+            }
+            const jp = txt.match(/JSON\.parse\((?:'|")([\s\S]*)(?:'|")\)/m);
+            if (jp) {
+              const candidate = jp[1].replace(/\\n/g, "").replace(/\\'/g, "'");
+              jsonObjects.push(JSON.parse(candidate));
+              continue;
+            }
+          } catch (e) {
+          }
+        }
+        const videoPriorityKeys = [
+          "playable_url",
+          "playable_url_quality_hd",
+          "hd_src_no_ratelimit",
+          "hd_src",
+          "sd_src_no_ratelimit",
+          "sd_src",
+          "source",
+          "browser_native_hd_url",
+          "browser_native_sd_url"
+        ];
+        for (const obj of jsonObjects) {
+          try {
+            const found = deepSearch(obj);
+            if (found) {
+              og.video = found;
+              break;
+            }
+          } catch (e) {
+          }
+        }
+        if (!og.video) {
+          try {
+            const mobileUrl = fbUrl.replace("https://www.facebook.com", "https://m.facebook.com");
+            const mRes = await fetch(mobileUrl, { headers: { "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 13_5 like Mac OS X)" } });
+            if (mRes.ok) {
+              const mHtml = await mRes.text();
+              for (const p of patterns) {
+                const mm = mHtml.match(p);
+                if (mm) {
+                  og.video = mm[1] ? mm[1].replace(/\\u0025/g, "%").replace(/\\/g, "") : mm[0].replace(/\\u0025/g, "%").replace(/\\/g, "");
+                  break;
+                }
+              }
+              if (!og.video) {
+                let mJsons = [];
+                let s;
+                while ((s = scriptRe.exec(mHtml)) !== null) {
+                  const t = (s[1] || "").trim();
+                  if (!t) continue;
+                  try {
+                    if (t[0] === "{" || t[0] === "[") mJsons.push(JSON.parse(t));
+                  } catch (e) {
+                  }
+                }
+                for (const o of mJsons) {
+                  const f = deepSearch(o);
+                  if (f) {
+                    og.video = f;
+                    break;
+                  }
+                }
+              }
+            }
+          } catch (e) {
+          }
+        }
+      }
+    }
+    if (!og.video && context && context.env && context.env.FB_ACCESS_TOKEN) {
+      try {
+        const token = context.env.FB_ACCESS_TOKEN;
+        let videoId = null;
+        const m1 = fbHtml.match(/\/videos\/(\d+)/);
+        if (m1) videoId = m1[1];
+        if (!videoId) {
+          const m2 = fbHtml.match(/"video_id"\s*:\s*"?(\d+)"?/i) || fbHtml.match(/"videoId"\s*:\s*"?(\d+)"?/i);
+          if (m2) videoId = m2[1];
+        }
+        if (videoId) {
+          try {
+            const gRes = await fetch(`https://graph.facebook.com/v17.0/${videoId}?fields=source&access_token=${token}`);
+            if (gRes.ok) {
+              const j = await gRes.json();
+              if (j && j.source) og.video = j.source;
+            }
+          } catch (e) {
+          }
+        }
+      } catch (e) {
+      }
+    }
+  } catch (e) {
+    error = e;
+  }
+  if (error || !og.title) {
+    og = {
+      title: "Post unavailable",
+      description: "This Facebook post could not be loaded.",
+      image: fallbackImage,
+      video: null
+    };
+  }
+  function escapeHtml3(s) {
+    if (!s) return "";
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+  __name(escapeHtml3, "escapeHtml3");
+  __name2(escapeHtml3, "escapeHtml");
+  const metaParts = [
+    `<meta property="og:title" content="${escapeHtml3(og.title)}" />`,
+    `<meta property="og:description" content="${escapeHtml3(og.description)}
+Watch on Facebook: ${fbUrl}" />`,
+    `<meta property="og:image" content="${og.image}" />`
+  ];
+  if (og.video) {
+    metaParts.push(`<meta property="og:video" content="${og.video}" />`);
+    metaParts.push(`<meta property="og:video:secure_url" content="${og.video}" />`);
+    metaParts.push(`<meta property="og:video:type" content="video/mp4" />`);
+    metaParts.push(`<meta name="twitter:card" content="player" />`);
+  }
+  const metaTags = metaParts.join("\n	");
+  const htmlOut = `<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>${escapeHtml3(og.title)}</title>
+	${metaTags}
+</head>
+<body>
+	<h2>${escapeHtml3(og.title)}</h2>
+	<p>${escapeHtml3(og.description)}</p>
+	<img src="${og.image}" alt="Post image" style="max-width:400px;display:block;" />
+	${og.video ? `<video src="${og.video}" controls style="max-width:400px;display:block;"></video>` : ""}
+	<p><a href="${fbUrl}" target="_blank">Watch on Facebook</a></p>
+</body>
+</html>`;
+  return new Response(htmlOut, { headers: { "Content-Type": "text/html" } });
+}
+__name(onRequest2, "onRequest2");
+__name2(onRequest2, "onRequest");
+async function onRequest3(context) {
+  const { request } = context;
   const urlObj = new URL(request.url);
   const fbUrl = urlObj.searchParams.get("url");
   if (!fbUrl || !/^https?:\/\/(www\.)?facebook\.com\//.test(fbUrl)) {
@@ -162,8 +623,259 @@ async function onRequest2(context) {
     return new Response(JSON.stringify({ error: "Failed to fetch or parse Facebook content." }), { status: 500, headers: { "Content-Type": "application/json" } });
   }
 }
-__name(onRequest2, "onRequest2");
-__name2(onRequest2, "onRequest");
+__name(onRequest3, "onRequest3");
+__name2(onRequest3, "onRequest");
+async function onRequest4(context) {
+  const { request } = context;
+  const reqUrl = new URL(request.url);
+  const pathname = reqUrl.pathname;
+  const search = reqUrl.search || "";
+  const fbShareUrl = `https://www.facebook.com${pathname}${search}`;
+  const ua = (request.headers.get("user-agent") || "").toLowerCase();
+  const botRe = /discord|bot|slack|twitter|facebookexternalhit|facebook|facebot|embed|crawler|spider|preview|vkshare|whatsapp|telegram|linkedin|skype|curl|wget|python|node|cfnetwork|okhttp|libwww|java|go-http/;
+  const isBot = botRe.test(ua);
+  let resolvedUrl = fbShareUrl;
+  try {
+    const headRes = await fetch(fbShareUrl, { method: "HEAD", redirect: "follow", headers: { "User-Agent": "Mozilla/5.0" } });
+    if (headRes && headRes.url) resolvedUrl = headRes.url;
+  } catch (e) {
+  }
+  if (!isBot) return Response.redirect(resolvedUrl, 302);
+  const fallbackImage = "https://fb-embed.pages.dev/image-not-found.png";
+  let og = { title: null, description: null, images: [], video: null };
+  let error = null;
+  try {
+    let normalize = /* @__PURE__ */ __name(function(s) {
+      if (!s) return s;
+      return s.replace(/\\u0025/g, "%").replace(/\\\//g, "/").replace(/\\\\/g, "\\\\").replace(/\\/g, "");
+    }, "normalize"), deepSearchForMP4 = /* @__PURE__ */ __name(function(node) {
+      if (!node) return null;
+      if (typeof node === "string") {
+        const cleaned = normalize(node);
+        const m = cleaned.match(/https?:\/\/[^\s"']+?\.mp4/i);
+        return m ? m[0] : null;
+      }
+      if (typeof node === "object") {
+        if (Array.isArray(node)) {
+          for (const it of node) {
+            const r = deepSearchForMP4(it);
+            if (r) return r;
+          }
+        } else {
+          for (const k of Object.keys(node)) {
+            try {
+              const v = node[k];
+              if (typeof v === "string") {
+                const cleaned = normalize(v);
+                const m = cleaned.match(/https?:\/\/[^\s"']+?\.mp4/i);
+                if (m) return m[0];
+              } else if (typeof v === "object") {
+                const r = deepSearchForMP4(v);
+                if (r) return r;
+              }
+            } catch (e) {
+            }
+          }
+        }
+      }
+      return null;
+    }, "deepSearchForMP4"), searchByPriority = /* @__PURE__ */ __name(function(node, keys) {
+      if (!node) return null;
+      if (typeof node === "string") {
+        const cleaned = normalize(node);
+        const m = cleaned.match(/https?:\/\/[^\s"']+?\.mp4/i);
+        return m ? m[0] : null;
+      }
+      if (typeof node === "object") {
+        if (Array.isArray(node)) {
+          for (const it of node) {
+            const r = searchByPriority(it, keys);
+            if (r) return r;
+          }
+        } else {
+          for (const k of Object.keys(node)) {
+            try {
+              if (keys.includes(k) && typeof node[k] === "string") {
+                const cleaned = normalize(node[k]);
+                const m = cleaned.match(/https?:\/\/[^\s"']+?\.mp4/i);
+                if (m) return m[0];
+              }
+            } catch (e) {
+            }
+          }
+          for (const k of Object.keys(node)) {
+            try {
+              const r = searchByPriority(node[k], keys);
+              if (r) return r;
+            } catch (e) {
+            }
+          }
+        }
+      }
+      return null;
+    }, "searchByPriority");
+    __name2(normalize, "normalize");
+    __name2(deepSearchForMP4, "deepSearchForMP4");
+    __name2(searchByPriority, "searchByPriority");
+    const fbRes = await fetch(resolvedUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
+    if (!fbRes.ok) throw new Error(`fetch failed: ${fbRes.status}`);
+    const fbHtml = await fbRes.text();
+    const ogTag = /* @__PURE__ */ __name2((name) => {
+      const regex = new RegExp(`<meta[^>]+property=["']og:${name}["'][^>]+content=["']([^"']+)["']`, "i");
+      const match2 = fbHtml.match(regex);
+      return match2 ? match2[1] : null;
+    }, "ogTag");
+    og.title = ogTag("title") || ogTag("site_name") || "Facebook Post";
+    og.description = ogTag("description") || "";
+    const primaryImage = ogTag("image") || ogTag("image:url") || fallbackImage;
+    if (primaryImage) og.images.push(primaryImage);
+    const jsonObjects = [];
+    const scriptRe = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
+    let sm;
+    while ((sm = scriptRe.exec(fbHtml)) !== null) {
+      const txt = (sm[1] || "").trim();
+      if (!txt) continue;
+      try {
+        if (txt[0] === "{" || txt[0] === "[") {
+          jsonObjects.push(JSON.parse(txt));
+          continue;
+        }
+        const assignMatch = txt.match(/=\s*({[\s\S]*})\s*;?$/m);
+        if (assignMatch) {
+          jsonObjects.push(JSON.parse(assignMatch[1]));
+          continue;
+        }
+        const jp = txt.match(/JSON\.parse\((?:'|")([\s\S]*)(?:'|")\)/m);
+        if (jp) {
+          const candidate = jp[1].replace(/\\n/g, "").replace(/\\'/g, "'");
+          jsonObjects.push(JSON.parse(candidate));
+          continue;
+        }
+      } catch (e) {
+      }
+    }
+    let pathLower = "/";
+    try {
+      pathLower = new URL(resolvedUrl).pathname.toLowerCase();
+    } catch (e) {
+      pathLower = pathname.toLowerCase();
+    }
+    let video = null;
+    if (/\/reel\b|\/reels?\b/.test(pathLower)) {
+      const reelKeys = ["browser_native_hd_url", "browser_native_sd_url", "videoDeliveryLegacyFields", "short_form_video_context", "video_links", "video_link", "playable_url", "playable_url_quality_hd", "hd_src", "sd_src", "source"];
+      for (const obj of jsonObjects) {
+        try {
+          const f = searchByPriority(obj, reelKeys);
+          if (f) {
+            video = f;
+            break;
+          }
+        } catch (e) {
+        }
+      }
+      if (!video) for (const obj of jsonObjects) {
+        try {
+          const f = deepSearchForMP4(obj);
+          if (f) {
+            video = f;
+            break;
+          }
+        } catch (e) {
+        }
+      }
+    } else if (/\/videos?\b|\/watch\b|\/v\b/.test(pathLower)) {
+      const vidKeys = ["playable_url", "playable_url_quality_hd", "hd_src_no_ratelimit", "hd_src", "sd_src_no_ratelimit", "sd_src", "source"];
+      for (const obj of jsonObjects) {
+        try {
+          const f = searchByPriority(obj, vidKeys);
+          if (f) {
+            video = f;
+            break;
+          }
+        } catch (e) {
+        }
+      }
+      if (!video) for (const obj of jsonObjects) {
+        try {
+          const f = deepSearchForMP4(obj);
+          if (f) {
+            video = f;
+            break;
+          }
+        } catch (e) {
+        }
+      }
+    } else {
+      for (const obj of jsonObjects) {
+        try {
+          const f = deepSearchForMP4(obj);
+          if (f) {
+            video = f;
+            break;
+          }
+        } catch (e) {
+        }
+      }
+    }
+    if (video) og.video = video.replace(/\\u0025/g, "%").replace(/\\/g, "");
+    if (!og.images || og.images.length === 0) og.images = [];
+    const imageSet = new Set(og.images.slice(0, 4));
+    for (const obj of jsonObjects) {
+      try {
+        const text = JSON.stringify(obj);
+        const matches = text.match(/https?:\/\/[^\s"']+?\.(?:jpe?g|png|gif|webp)/gi);
+        if (matches) for (const m of matches) {
+          if (imageSet.size < 4) imageSet.add(m);
+        }
+      } catch (e) {
+      }
+    }
+    og.images = Array.from(imageSet);
+    if (og.images.length === 0) og.images.push(primaryImage || fallbackImage);
+  } catch (e) {
+    error = e;
+  }
+  if (error || !og.title) {
+    og = { title: "Post unavailable", description: "This Facebook post could not be loaded.", images: [fallbackImage], video: null };
+  }
+  const metaParts = [
+    `<meta property="og:title" content="${escapeHtml2(og.title)}" />`,
+    `<meta property="og:description" content="${escapeHtml2(og.description)}
+Watch on Facebook: ${resolvedUrl}" />`
+  ];
+  for (const img of og.images.slice(0, 4)) metaParts.push(`<meta property="og:image" content="${img}" />`);
+  if (og.video) {
+    metaParts.push(`<meta property="og:video" content="${og.video}" />`);
+    metaParts.push(`<meta property="og:video:secure_url" content="${og.video}" />`);
+    metaParts.push(`<meta property="og:video:type" content="video/mp4" />`);
+    metaParts.push(`<meta name="twitter:card" content="player" />`);
+  }
+  const metaTags = metaParts.join("\n	");
+  const htmlOut = `<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>${escapeHtml2(og.title)}</title>
+	${metaTags}
+</head>
+<body>
+	<h2>${escapeHtml2(og.title)}</h2>
+	<p>${escapeHtml2(og.description)}</p>
+	${og.images[0] ? `<img src="${og.images[0]}" alt="Post image" style="max-width:400px;display:block;" />` : ""}
+	${og.video ? `<video src="${og.video}" controls style="max-width:400px;display:block;"></video>` : ""}
+	<p><a href="${resolvedUrl}" target="_blank">Watch on Facebook</a></p>
+</body>
+</html>`;
+  return new Response(htmlOut, { headers: { "Content-Type": "text/html" } });
+}
+__name(onRequest4, "onRequest4");
+__name2(onRequest4, "onRequest");
+function escapeHtml2(s) {
+  if (!s) return "";
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+__name(escapeHtml2, "escapeHtml2");
+__name2(escapeHtml2, "escapeHtml");
 var routes = [
   {
     routePath: "/share/r/:id",
@@ -173,11 +885,25 @@ var routes = [
     modules: [onRequest]
   },
   {
+    routePath: "/share/v/:id",
+    mountPath: "/share/v",
+    method: "",
+    middlewares: [],
+    modules: [onRequest2]
+  },
+  {
     routePath: "/api/embed",
     mountPath: "/api",
     method: "",
     middlewares: [],
-    modules: [onRequest2]
+    modules: [onRequest3]
+  },
+  {
+    routePath: "/share/:id",
+    mountPath: "/share",
+    method: "",
+    middlewares: [],
+    modules: [onRequest4]
   }
 ];
 function lexer(str) {
@@ -845,7 +1571,7 @@ var jsonError2 = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx
 }, "jsonError");
 var middleware_miniflare3_json_error_default2 = jsonError2;
 
-// .wrangler/tmp/bundle-BydjTw/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-jGpGlI/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__2 = [
   middleware_ensure_req_body_drained_default2,
   middleware_miniflare3_json_error_default2
@@ -877,7 +1603,7 @@ function __facade_invoke__2(request, env, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__2, "__facade_invoke__");
 
-// .wrangler/tmp/bundle-BydjTw/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-jGpGlI/middleware-loader.entry.ts
 var __Facade_ScheduledController__2 = class ___Facade_ScheduledController__2 {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;
@@ -977,4 +1703,4 @@ export {
   __INTERNAL_WRANGLER_MIDDLEWARE__2 as __INTERNAL_WRANGLER_MIDDLEWARE__,
   middleware_loader_entry_default2 as default
 };
-//# sourceMappingURL=functionsWorker-0.31180737945961545.js.map
+//# sourceMappingURL=functionsWorker-0.16715680175253822.js.map

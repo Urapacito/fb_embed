@@ -1,8 +1,9 @@
-// Cloudflare Pages Function for /share/* routes
+// Alias Cloudflare Pages Function for /share/v/:id
+// Mirrors the behavior of /share/r/:id to preserve backward-compatible routes
 export async function onRequest(context) {
 	const { request } = context;
 	const reqUrl = new URL(request.url);
-	const pathname = reqUrl.pathname; // e.g. /share/r/ID/
+	const pathname = reqUrl.pathname; // e.g. /share/v/ID/
 	const search = reqUrl.search || '';
 	const fbUrl = `https://www.facebook.com${pathname}${search}`;
 
@@ -36,14 +37,13 @@ export async function onRequest(context) {
 
 		// Try to extract direct video URL from embedded JSON if og:video is not found
 		if (!og.video) {
-			// quick regex search first (common patterns)
 			const patterns = [
-				/"playable_url":"(https:[^\"]+?\.mp4)"/,
-				/"playable_url_quality_hd":"(https:[^\"]+?\.mp4)"/,
-				/"hd_src_no_ratelimit":"(https:[^\"]+?\.mp4)"/,
-				/"hd_src":"(https:[^\"]+?\.mp4)"/,
-				/"sd_src_no_ratelimit":"(https:[^\"]+?\.mp4)"/,
-				/"sd_src":"(https:[^\"]+?\.mp4)"/,
+				/"playable_url":"(https:[^\\"]+?\.mp4)"/,
+				/"playable_url_quality_hd":"(https:[^\\"]+?\.mp4)"/,
+				/"hd_src_no_ratelimit":"(https:[^\\"]+?\.mp4)"/,
+				/"hd_src":"(https:[^\\"]+?\.mp4)"/,
+				/"sd_src_no_ratelimit":"(https:[^\\"]+?\.mp4)"/,
+				/"sd_src":"(https:[^\\"]+?\.mp4)"/,
 				/https?:\/\/[^\s"']+?\.mp4/gi
 			];
 			for (const p of patterns) {
@@ -54,7 +54,6 @@ export async function onRequest(context) {
 				}
 			}
 
-			// If still no video, parse JSON blocks embedded in scripts and deep-search for MP4 URLs
 			if (!og.video) {
 				const jsonObjects = [];
 				const scriptRe = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
@@ -67,13 +66,11 @@ export async function onRequest(context) {
 							jsonObjects.push(JSON.parse(txt));
 							continue;
 						}
-						// look for assignment like: window._sharedData = { ... };
 						const assignMatch = txt.match(/=\s*({[\s\S]*})\s*;?$/m);
 						if (assignMatch) {
 							jsonObjects.push(JSON.parse(assignMatch[1]));
 							continue;
 						}
-						// JSON.parse("...") patterns
 						const jp = txt.match(/JSON\.parse\((?:'|")([\s\S]*)(?:'|")\)/m);
 						if (jp) {
 							const candidate = jp[1].replace(/\\n/g, '').replace(/\\'/g, "'");
@@ -85,11 +82,9 @@ export async function onRequest(context) {
 					}
 				}
 
-					// Prioritize reel-specific keys first when searching JSON blobs
-					const reelPriorityKeys = [
-						'browser_native_hd_url', 'browser_native_sd_url', 'browser_native_sd_url',
-						'videoDeliveryLegacyFields', 'short_form_video_context', 'video_links', 'video_link',
-						'playable_url', 'playable_url_quality_hd', 'hd_src', 'sd_src', 'source'
+					// Prioritize video-specific keys first when searching JSON blobs
+					const videoPriorityKeys = [
+						'playable_url', 'playable_url_quality_hd', 'hd_src_no_ratelimit', 'hd_src', 'sd_src_no_ratelimit', 'sd_src', 'source', 'browser_native_hd_url', 'browser_native_sd_url'
 					];
 
 				function normalize(s) {
@@ -111,7 +106,6 @@ export async function onRequest(context) {
 								if (r) return r;
 							}
 						} else {
-							// check direct keys first
 							for (const k of Object.keys(node)) {
 								try {
 									if (keys.includes(k) && typeof node[k] === 'string') {
@@ -121,7 +115,6 @@ export async function onRequest(context) {
 									}
 								} catch (e) { }
 							}
-							// then recurse
 							for (const k of Object.keys(node)) {
 								try {
 									const r = searchByPriority(node[k], keys);
@@ -179,14 +172,12 @@ export async function onRequest(context) {
 					}
 				}
 
-				// final fallback: try mobile page (some posts expose different JSON there)
 				if (!og.video) {
 					try {
 						const mobileUrl = fbUrl.replace('https://www.facebook.com', 'https://m.facebook.com');
 						const mRes = await fetch(mobileUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 13_5 like Mac OS X)' } });
 						if (mRes.ok) {
 							const mHtml = await mRes.text();
-							// repeat regex + json search on mobile HTML
 							for (const p of patterns) {
 								const mm = mHtml.match(p);
 								if (mm) {
@@ -250,6 +241,11 @@ export async function onRequest(context) {
 		};
 	}
 
+	function escapeHtml(s) {
+		if (!s) return '';
+		return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+	}
+
 	// Build Open Graph meta tags (include richer video tags when available)
 	const metaParts = [
 		`<meta property="og:title" content="${escapeHtml(og.title)}" />`,
@@ -261,7 +257,6 @@ export async function onRequest(context) {
 		metaParts.push(`<meta property="og:video" content="${og.video}" />`);
 		metaParts.push(`<meta property="og:video:secure_url" content="${og.video}" />`);
 		metaParts.push(`<meta property="og:video:type" content="video/mp4" />`);
-		// Helpful twitter card hints
 		metaParts.push(`<meta name="twitter:card" content="player" />`);
 	}
 
@@ -284,9 +279,4 @@ export async function onRequest(context) {
 </html>`;
 
 	return new Response(htmlOut, { headers: { 'Content-Type': 'text/html' } });
-}
-
-function escapeHtml(s) {
-	if (!s) return '';
-	return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
