@@ -136,18 +136,63 @@ export async function onRequest(context) {
 
 		if (video) og.video = video.replace(/\\u0025/g, '%').replace(/\\/g, '');
 
-		// collect images if no video or to provide fallback
+		// collect images (targeted) to avoid grabbing icons/sprites and unrelated meta
 		if (!og.images || og.images.length === 0) og.images = [];
-		const imageSet = new Set(og.images.slice(0,4));
-		for (const obj of jsonObjects) {
-			try {
-				const text = JSON.stringify(obj);
-				const matches = text.match(/https?:\/\/[^\s"']+?\.(?:jpe?g|png|gif|webp)/gi);
-				if (matches) for (const m of matches) { if (imageSet.size < 4) imageSet.add(m); }
-			} catch (e) { }
+		const imagesSet = new Set(og.images.slice(0,4));
+		let attachmentsDetected = false;
+		const denyImgRe = /\/rsrc\.php|emoji|sprite_|favicon\.ico|platform-lookaside|emoji\.php|icons?\//i;
+		const preferImgRe = /scontent\.|fbcdn\.net|video\.|thumbnail|thumb/i;
+
+		function collectImages(node, keyPath = '') {
+			if (!node) return;
+			if (typeof node === 'string') {
+				const s = normalize(node);
+				if (/\.(jpe?g|png|gif|webp)(?:\?|$)/i.test(s)) {
+					if (denyImgRe.test(s)) return;
+					if (preferImgRe.test(s) || imagesSet.size === 0) imagesSet.add(s);
+				}
+				return;
+			}
+			if (typeof node === 'object') {
+				if (Array.isArray(node)) {
+					for (const it of node) collectImages(it, keyPath);
+					return;
+				}
+				for (const k of Object.keys(node)) {
+					const v = node[k];
+					const kp = (keyPath ? (keyPath + '.' + k) : k).toLowerCase();
+					if (/attach|media|image|thumb|display|photo|thumbnail|picture|gallery|images?/.test(kp)) {
+						if (/attach|attachment|attachments/.test(k.toLowerCase())) attachmentsDetected = true;
+						collectImages(v, kp);
+						continue;
+					}
+					if (typeof v === 'string' && /\.(jpe?g|png|gif|webp)(?:\?|$)/i.test(v)) {
+						const vn = normalize(v);
+						if (!denyImgRe.test(vn)) {
+							if (preferImgRe.test(vn) || imagesSet.size === 0) imagesSet.add(vn);
+						}
+					}
+				}
+			}
 		}
-		og.images = Array.from(imageSet);
-		if (og.images.length === 0) og.images.push(primaryImage || fallbackImage);
+
+		for (const obj of jsonObjects) {
+			try { collectImages(obj); } catch (e) { }
+		}
+
+		let imagesArr = Array.from(imagesSet);
+		// prefer fbcdn / scontent hosts first
+		imagesArr.sort((a, b) => {
+			const pa = preferImgRe.test(a) ? 0 : 1;
+			const pb = preferImgRe.test(b) ? 0 : 1;
+			return pa - pb;
+		});
+
+		if (!attachmentsDetected) imagesArr = imagesArr.slice(0, 1);
+		else imagesArr = imagesArr.slice(0, 4);
+
+		if (imagesArr.length === 0) imagesArr.push(primaryImage || fallbackImage);
+		og.images = imagesArr;
 
 		// If we still don't have a direct mp4, try mobile/mbasic HTML fallbacks
 		if (!og.video) {

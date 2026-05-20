@@ -1,7 +1,7 @@
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
-// ../.wrangler/tmp/bundle-mu4yTy/checked-fetch.js
+// ../.wrangler/tmp/bundle-MdT9Q3/checked-fetch.js
 var urls = /* @__PURE__ */ new Set();
 function checkURL(request, init) {
   const url = request instanceof URL ? request : new URL(
@@ -687,10 +687,42 @@ async function onRequest4(context) {
         }
       }
       return null;
+    }, collectImages = function(node, keyPath = "") {
+      if (!node) return;
+      if (typeof node === "string") {
+        const s = normalize(node);
+        if (/\.(jpe?g|png|gif|webp)(?:\?|$)/i.test(s)) {
+          if (denyImgRe.test(s)) return;
+          if (preferImgRe.test(s) || imagesSet.size === 0) imagesSet.add(s);
+        }
+        return;
+      }
+      if (typeof node === "object") {
+        if (Array.isArray(node)) {
+          for (const it of node) collectImages(it, keyPath);
+          return;
+        }
+        for (const k of Object.keys(node)) {
+          const v = node[k];
+          const kp = (keyPath ? keyPath + "." + k : k).toLowerCase();
+          if (/attach|media|image|thumb|display|photo|thumbnail|picture|gallery|images?/.test(kp)) {
+            if (/attach|attachment|attachments/.test(k.toLowerCase())) attachmentsDetected = true;
+            collectImages(v, kp);
+            continue;
+          }
+          if (typeof v === "string" && /\.(jpe?g|png|gif|webp)(?:\?|$)/i.test(v)) {
+            const vn = normalize(v);
+            if (!denyImgRe.test(vn)) {
+              if (preferImgRe.test(vn) || imagesSet.size === 0) imagesSet.add(vn);
+            }
+          }
+        }
+      }
     };
     __name(normalize, "normalize");
     __name(deepSearchForMP4, "deepSearchForMP4");
     __name(searchByPriority, "searchByPriority");
+    __name(collectImages, "collectImages");
     const fbRes = await fetch(resolvedUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
     if (!fbRes.ok) throw new Error(`fetch failed: ${fbRes.status}`);
     const fbHtml = await fbRes.text();
@@ -810,19 +842,26 @@ async function onRequest4(context) {
     }
     if (video) og.video = video.replace(/\\u0025/g, "%").replace(/\\/g, "");
     if (!og.images || og.images.length === 0) og.images = [];
-    const imageSet = new Set(og.images.slice(0, 4));
+    const imagesSet = new Set(og.images.slice(0, 4));
+    let attachmentsDetected = false;
+    const denyImgRe = /\/rsrc\.php|emoji|sprite_|favicon\.ico|platform-lookaside|emoji\.php|icons?\//i;
+    const preferImgRe = /scontent\.|fbcdn\.net|video\.|thumbnail|thumb/i;
     for (const obj of jsonObjects) {
       try {
-        const text = JSON.stringify(obj);
-        const matches = text.match(/https?:\/\/[^\s"']+?\.(?:jpe?g|png|gif|webp)/gi);
-        if (matches) for (const m of matches) {
-          if (imageSet.size < 4) imageSet.add(m);
-        }
+        collectImages(obj);
       } catch (e) {
       }
     }
-    og.images = Array.from(imageSet);
-    if (og.images.length === 0) og.images.push(primaryImage || fallbackImage);
+    let imagesArr = Array.from(imagesSet);
+    imagesArr.sort((a, b) => {
+      const pa = preferImgRe.test(a) ? 0 : 1;
+      const pb = preferImgRe.test(b) ? 0 : 1;
+      return pa - pb;
+    });
+    if (!attachmentsDetected) imagesArr = imagesArr.slice(0, 1);
+    else imagesArr = imagesArr.slice(0, 4);
+    if (imagesArr.length === 0) imagesArr.push(primaryImage || fallbackImage);
+    og.images = imagesArr;
     if (!og.video) {
       try {
         const mobileUrl = resolvedUrl.replace("www.facebook.com", "m.facebook.com");
@@ -1431,7 +1470,7 @@ var jsonError = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx)
 }, "jsonError");
 var middleware_miniflare3_json_error_default = jsonError;
 
-// ../.wrangler/tmp/bundle-mu4yTy/middleware-insertion-facade.js
+// ../.wrangler/tmp/bundle-MdT9Q3/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__ = [
   middleware_ensure_req_body_drained_default,
   middleware_miniflare3_json_error_default
@@ -1463,7 +1502,7 @@ function __facade_invoke__(request, env, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__, "__facade_invoke__");
 
-// ../.wrangler/tmp/bundle-mu4yTy/middleware-loader.entry.ts
+// ../.wrangler/tmp/bundle-MdT9Q3/middleware-loader.entry.ts
 var __Facade_ScheduledController__ = class ___Facade_ScheduledController__ {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;
