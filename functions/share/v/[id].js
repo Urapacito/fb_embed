@@ -6,6 +6,7 @@ export async function onRequest(context) {
 	const pathname = reqUrl.pathname; // e.g. /share/v/ID/
 	const search = reqUrl.search || '';
 	const fbUrl = `https://www.facebook.com${pathname}${search}`;
+	const fbShort = `https://www.facebook.com${pathname}`;
 
 	// Detect bots/crawlers vs real browsers using User-Agent
 	const ua = (request.headers.get('user-agent') || '').toLowerCase();
@@ -34,6 +35,65 @@ export async function onRequest(context) {
 		og.description = ogTag('description') || '';
 		og.image = ogTag('image') || ogTag('image:url') || fallbackImage;
 		og.video = ogTag('video') || ogTag('video:secure_url') || ogTag('video:url') || null;
+
+		// Parse script JSON blocks early so we can collect images and other media
+		const jsonObjects = [];
+		const scriptRe = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
+		let sm;
+		while ((sm = scriptRe.exec(fbHtml)) !== null) {
+			const txt = (sm[1] || '').trim();
+			if (!txt) continue;
+			try {
+				if (txt[0] === '{' || txt[0] === '[') { jsonObjects.push(JSON.parse(txt)); continue; }
+				const assignMatch = txt.match(/=\s*({[\s\S]*})\s*;?$/m);
+				if (assignMatch) { jsonObjects.push(JSON.parse(assignMatch[1])); continue; }
+				const jp = txt.match(/JSON\.parse\((?:'|")([\s\S]*)(?:'|")\)/m);
+				if (jp) { const candidate = jp[1].replace(/\\n/g, '').replace(/\\'/g, "'"); jsonObjects.push(JSON.parse(candidate)); continue; }
+			} catch (e) { }
+		}
+
+		function normalize(s) { if (!s) return s; return s.replace(/\\u0025/g, '%').replace(/\\\//g, '/').replace(/\\\\/g, '\\\\').replace(/\\/g, ''); }
+
+		// Collect images from JSON blobs while avoiding icons/sprites
+		const denyImgRe = /\/rsrc\.php|emoji|sprite_|favicon\.ico|platform-lookaside|emoji\.php|icons?\//i;
+		const preferImgRe = /scontent\.|fbcdn\.net|video\.|thumbnail|thumb/i;
+		const imagesSet = new Set(og.image ? [og.image] : []);
+		let attachmentsDetected = false;
+
+		function collectImages(node, keyPath = '') {
+			if (!node) return;
+			if (typeof node === 'string') {
+				const s = normalize(node);
+				if (/\.(jpe?g|png|gif|webp)(?:\?|$)/i.test(s)) {
+					if (denyImgRe.test(s)) return;
+					if (preferImgRe.test(s) || imagesSet.size === 0) imagesSet.add(s);
+				}
+				return;
+			}
+			if (typeof node === 'object') {
+				if (Array.isArray(node)) { for (const it of node) collectImages(it, keyPath); return; }
+				for (const k of Object.keys(node)) {
+					const v = node[k];
+					const kp = (keyPath ? (keyPath + '.' + k) : k).toLowerCase();
+					if (/attach|media|image|thumb|display|photo|thumbnail|picture|gallery|images?/.test(kp)) {
+						if (/attach|attachment|attachments/.test(k.toLowerCase())) attachmentsDetected = true;
+						collectImages(v, kp);
+						continue;
+					}
+					if (typeof v === 'string' && /\.(jpe?g|png|gif|webp)(?:\?|$)/i.test(v)) {
+						const vn = normalize(v);
+						if (!denyImgRe.test(vn)) { if (preferImgRe.test(vn) || imagesSet.size === 0) imagesSet.add(vn); }
+					}
+				}
+			}
+		}
+
+		for (const obj of jsonObjects) { try { collectImages(obj); } catch (e) { } }
+		let imagesArr = Array.from(imagesSet);
+		imagesArr.sort((a,b) => (preferImgRe.test(a)?0:1) - (preferImgRe.test(b)?0:1));
+		if (!attachmentsDetected) imagesArr = imagesArr.slice(0,1); else imagesArr = imagesArr.slice(0,4);
+		if (imagesArr.length === 0) imagesArr.push(og.image || fallbackImage);
+		og.images = imagesArr;
 
 		// Try to extract direct video URL from embedded JSON if og:video is not found
 		if (!og.video) {
@@ -249,9 +309,11 @@ export async function onRequest(context) {
 	// Build Open Graph meta tags (include richer video tags when available)
 	const metaParts = [
 		`<meta property="og:title" content="${escapeHtml(og.title)}" />`,
-		`<meta property="og:description" content="${escapeHtml(og.description)}\nWatch on Facebook: ${fbUrl}" />`,
-		`<meta property="og:image" content="${og.image}" />`
+		`<meta property="og:description" content="${escapeHtml(og.description)}\nWatch on Facebook: ${fbShort}" />`,
+		`<meta property="og:url" content="${fbShort}" />`
 	];
+
+	for (const img of (og.images || []).slice(0,4)) metaParts.push(`<meta property="og:image" content="${img}" />`);
 
 	if (og.video) {
 		metaParts.push(`<meta property="og:video" content="${og.video}" />`);
@@ -272,9 +334,9 @@ export async function onRequest(context) {
 <body>
 	<h2>${escapeHtml(og.title)}</h2>
 	<p>${escapeHtml(og.description)}</p>
-	<img src="${og.image}" alt="Post image" style="max-width:400px;display:block;" />
+	${og.images && og.images[0] ? `<img src="${og.images[0]}" alt="Post image" style="max-width:400px;display:block;" />` : ''}
 	${og.video ? `<video src="${og.video}" controls style="max-width:400px;display:block;"></video>` : ''}
-	<p><a href="${fbUrl}" target="_blank">Watch on Facebook</a></p>
+	<p><a href="${fbShort}" target="_blank">Watch on Facebook</a></p>
 </body>
 </html>`;
 

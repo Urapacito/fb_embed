@@ -23,6 +23,8 @@ export async function onRequest(context) {
 	// If not a bot, redirect browsers to the resolved Facebook URL
 	if (!isBot) return Response.redirect(resolvedUrl, 302);
 
+	const fbShort = `https://www.facebook.com${pathname}`;
+
 	const fallbackImage = 'https://fb-embed.pages.dev/image-not-found.png';
 
 	let og = { title: null, description: null, images: [], video: null };
@@ -242,10 +244,11 @@ export async function onRequest(context) {
 	// Build Open Graph meta tags
 	const metaParts = [
 		`<meta property="og:title" content="${escapeHtml(og.title)}" />`,
-		`<meta property="og:description" content="${escapeHtml(og.description)}\nWatch on Facebook: ${resolvedUrl}" />`
+		`<meta property="og:description" content="${escapeHtml(og.description)}\nWatch on Facebook: ${fbShort}" />`,
+		`<meta property="og:url" content="${fbShort}" />`
 	];
 
-	for (const img of og.images.slice(0,4)) metaParts.push(`<meta property="og:image" content="${img}" />`);
+	for (const img of (og.images || []).slice(0,4)) metaParts.push(`<meta property="og:image" content="${img}" />`);
 
 	if (og.video) {
 		metaParts.push(`<meta property="og:video" content="${og.video}" />`);
@@ -268,7 +271,7 @@ export async function onRequest(context) {
 	<p>${escapeHtml(og.description)}</p>
 	${og.images[0] ? `<img src="${og.images[0]}" alt="Post image" style="max-width:400px;display:block;" />` : ''}
 	${og.video ? `<video src="${og.video}" controls style="max-width:400px;display:block;"></video>` : ''}
-	<p><a href="${resolvedUrl}" target="_blank">Watch on Facebook</a></p>
+	<p><a href="${fbShort}" target="_blank">Watch on Facebook</a></p>
 </body>
 </html>`;
 

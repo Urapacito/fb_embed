@@ -61,6 +61,7 @@ async function onRequest(context) {
   const pathname = reqUrl.pathname;
   const search = reqUrl.search || "";
   const fbUrl = `https://www.facebook.com${pathname}${search}`;
+  const fbShort = `https://www.facebook.com${pathname}`;
   const ua = (request.headers.get("user-agent") || "").toLowerCase();
   const botRe = /discord|bot|slack|twitter|facebookexternalhit|facebook|facebot|embed|crawler|spider|preview|vkshare|whatsapp|telegram|linkedin|skype|curl|wget|python|node|cfnetwork|okhttp|libwww|java|go-http/;
   const isBot = botRe.test(ua);
@@ -69,6 +70,43 @@ async function onRequest(context) {
   let og = { title: null, description: null, image: null, video: null };
   let error = null;
   try {
+    let normalize = /* @__PURE__ */ __name(function(s) {
+      if (!s) return s;
+      return s.replace(/\\u0025/g, "%").replace(/\\\//g, "/").replace(/\\\\/g, "\\\\").replace(/\\/g, "");
+    }, "normalize"), collectImages = /* @__PURE__ */ __name(function(node, keyPath = "") {
+      if (!node) return;
+      if (typeof node === "string") {
+        const s = normalize(node);
+        if (/\.(jpe?g|png|gif|webp)(?:\?|$)/i.test(s)) {
+          if (denyImgRe.test(s)) return;
+          if (preferImgRe.test(s) || imagesSet.size === 0) imagesSet.add(s);
+        }
+        return;
+      }
+      if (typeof node === "object") {
+        if (Array.isArray(node)) {
+          for (const it of node) collectImages(it, keyPath);
+          return;
+        }
+        for (const k of Object.keys(node)) {
+          const v = node[k];
+          const kp = (keyPath ? keyPath + "." + k : k).toLowerCase();
+          if (/attach|media|image|thumb|display|photo|thumbnail|picture|gallery|images?/.test(kp)) {
+            if (/attach|attachment|attachments/.test(k.toLowerCase())) attachmentsDetected = true;
+            collectImages(v, kp);
+            continue;
+          }
+          if (typeof v === "string" && /\.(jpe?g|png|gif|webp)(?:\?|$)/i.test(v)) {
+            const vn = normalize(v);
+            if (!denyImgRe.test(vn)) {
+              if (preferImgRe.test(vn) || imagesSet.size === 0) imagesSet.add(vn);
+            }
+          }
+        }
+      }
+    }, "collectImages");
+    __name2(normalize, "normalize");
+    __name2(collectImages, "collectImages");
     const fbRes = await fetch(fbUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
     if (!fbRes.ok) throw new Error(`fetch failed: ${fbRes.status}`);
     const fbHtml = await fbRes.text();
@@ -81,6 +119,47 @@ async function onRequest(context) {
     og.description = ogTag("description") || "";
     og.image = ogTag("image") || ogTag("image:url") || fallbackImage;
     og.video = ogTag("video") || ogTag("video:secure_url") || ogTag("video:url") || null;
+    const jsonObjects = [];
+    const scriptRe = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
+    let sm;
+    while ((sm = scriptRe.exec(fbHtml)) !== null) {
+      const txt = (sm[1] || "").trim();
+      if (!txt) continue;
+      try {
+        if (txt[0] === "{" || txt[0] === "[") {
+          jsonObjects.push(JSON.parse(txt));
+          continue;
+        }
+        const assignMatch = txt.match(/=\s*({[\s\S]*})\s*;?$/m);
+        if (assignMatch) {
+          jsonObjects.push(JSON.parse(assignMatch[1]));
+          continue;
+        }
+        const jp = txt.match(/JSON\.parse\((?:'|")([\s\S]*)(?:'|")\)/m);
+        if (jp) {
+          const candidate = jp[1].replace(/\\n/g, "").replace(/\\'/g, "'");
+          jsonObjects.push(JSON.parse(candidate));
+          continue;
+        }
+      } catch (e) {
+      }
+    }
+    const denyImgRe = /\/rsrc\.php|emoji|sprite_|favicon\.ico|platform-lookaside|emoji\.php|icons?\//i;
+    const preferImgRe = /scontent\.|fbcdn\.net|video\.|thumbnail|thumb/i;
+    const imagesSet = new Set(og.image ? [og.image] : []);
+    let attachmentsDetected = false;
+    for (const obj of jsonObjects) {
+      try {
+        collectImages(obj);
+      } catch (e) {
+      }
+    }
+    let imagesArr = Array.from(imagesSet);
+    imagesArr.sort((a, b) => (preferImgRe.test(a) ? 0 : 1) - (preferImgRe.test(b) ? 0 : 1));
+    if (!attachmentsDetected) imagesArr = imagesArr.slice(0, 1);
+    else imagesArr = imagesArr.slice(0, 4);
+    if (imagesArr.length === 0) imagesArr.push(og.image || fallbackImage);
+    og.images = imagesArr;
     if (!og.video) {
       const patterns = [
         /"playable_url":"(https:[^\"]+?\.mp4)"/,
@@ -99,13 +178,13 @@ async function onRequest(context) {
         }
       }
       if (!og.video) {
-        let normalize = /* @__PURE__ */ __name(function(s) {
+        let normalize2 = /* @__PURE__ */ __name(function(s) {
           if (!s) return s;
           return s.replace(/\\u0025/g, "%").replace(/\\\//g, "/").replace(/\\\\/g, "\\\\").replace(/\\/g, "");
-        }, "normalize"), searchByPriority = /* @__PURE__ */ __name(function(node, keys) {
+        }, "normalize2"), searchByPriority = /* @__PURE__ */ __name(function(node, keys) {
           if (!node) return null;
           if (typeof node === "string") {
-            const cleaned = normalize(node);
+            const cleaned = normalize2(node);
             const m = cleaned.match(/https?:\/\/[^\s\"']+?\.mp4/i);
             return m ? m[0] : null;
           }
@@ -119,7 +198,7 @@ async function onRequest(context) {
               for (const k of Object.keys(node)) {
                 try {
                   if (keys.includes(k) && typeof node[k] === "string") {
-                    const cleaned = normalize(node[k]);
+                    const cleaned = normalize2(node[k]);
                     const m = cleaned.match(/https?:\/\/[^\s\"']+?\.mp4/i);
                     if (m) return m[0];
                   }
@@ -139,7 +218,7 @@ async function onRequest(context) {
         }, "searchByPriority"), deepSearch = /* @__PURE__ */ __name(function(node) {
           if (!node) return null;
           if (typeof node === "string") {
-            const cleaned = normalize(node);
+            const cleaned = normalize2(node);
             const m = cleaned.match(/https?:\/\/[^\s"']+?\.mp4/i);
             return m ? m[0] : null;
           }
@@ -154,7 +233,7 @@ async function onRequest(context) {
                 try {
                   const v = node[k];
                   if (typeof v === "string") {
-                    const cleaned = normalize(v);
+                    const cleaned = normalize2(v);
                     const m = cleaned.match(/https?:\/\/[^\s"']+?\.mp4/i);
                     if (m) return m[0];
                   } else if (typeof v === "object") {
@@ -168,29 +247,29 @@ async function onRequest(context) {
           }
           return null;
         }, "deepSearch");
-        __name2(normalize, "normalize");
+        __name2(normalize2, "normalize");
         __name2(searchByPriority, "searchByPriority");
         __name2(deepSearch, "deepSearch");
-        const jsonObjects = [];
-        const scriptRe = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
-        let sm;
-        while ((sm = scriptRe.exec(fbHtml)) !== null) {
-          const txt = (sm[1] || "").trim();
+        const jsonObjects2 = [];
+        const scriptRe2 = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
+        let sm2;
+        while ((sm2 = scriptRe2.exec(fbHtml)) !== null) {
+          const txt = (sm2[1] || "").trim();
           if (!txt) continue;
           try {
             if (txt[0] === "{" || txt[0] === "[") {
-              jsonObjects.push(JSON.parse(txt));
+              jsonObjects2.push(JSON.parse(txt));
               continue;
             }
             const assignMatch = txt.match(/=\s*({[\s\S]*})\s*;?$/m);
             if (assignMatch) {
-              jsonObjects.push(JSON.parse(assignMatch[1]));
+              jsonObjects2.push(JSON.parse(assignMatch[1]));
               continue;
             }
             const jp = txt.match(/JSON\.parse\((?:'|")([\s\S]*)(?:'|")\)/m);
             if (jp) {
               const candidate = jp[1].replace(/\\n/g, "").replace(/\\'/g, "'");
-              jsonObjects.push(JSON.parse(candidate));
+              jsonObjects2.push(JSON.parse(candidate));
               continue;
             }
           } catch (e) {
@@ -210,7 +289,7 @@ async function onRequest(context) {
           "sd_src",
           "source"
         ];
-        for (const obj of jsonObjects) {
+        for (const obj of jsonObjects2) {
           try {
             const found = deepSearch(obj);
             if (found) {
@@ -236,7 +315,7 @@ async function onRequest(context) {
               if (!og.video) {
                 let mJsons = [];
                 let s;
-                while ((s = scriptRe.exec(mHtml)) !== null) {
+                while ((s = scriptRe2.exec(mHtml)) !== null) {
                   const t = (s[1] || "").trim();
                   if (!t) continue;
                   try {
@@ -295,9 +374,10 @@ async function onRequest(context) {
   const metaParts = [
     `<meta property="og:title" content="${escapeHtml(og.title)}" />`,
     `<meta property="og:description" content="${escapeHtml(og.description)}
-Watch on Facebook: ${fbUrl}" />`,
-    `<meta property="og:image" content="${og.image}" />`
+Watch on Facebook: ${fbShort}" />`,
+    `<meta property="og:url" content="${fbShort}" />`
   ];
+  for (const img of (og.images || []).slice(0, 4)) metaParts.push(`<meta property="og:image" content="${img}" />`);
   if (og.video) {
     metaParts.push(`<meta property="og:video" content="${og.video}" />`);
     metaParts.push(`<meta property="og:video:secure_url" content="${og.video}" />`);
@@ -315,9 +395,9 @@ Watch on Facebook: ${fbUrl}" />`,
 <body>
 	<h2>${escapeHtml(og.title)}</h2>
 	<p>${escapeHtml(og.description)}</p>
-	<img src="${og.image}" alt="Post image" style="max-width:400px;display:block;" />
+	${og.images && og.images[0] ? `<img src="${og.images[0]}" alt="Post image" style="max-width:400px;display:block;" />` : ""}
 	${og.video ? `<video src="${og.video}" controls style="max-width:400px;display:block;"></video>` : ""}
-	<p><a href="${fbUrl}" target="_blank">Watch on Facebook</a></p>
+	<p><a href="${fbShort}" target="_blank">Watch on Facebook</a></p>
 </body>
 </html>`;
   return new Response(htmlOut, { headers: { "Content-Type": "text/html" } });
@@ -336,6 +416,7 @@ async function onRequest2(context) {
   const pathname = reqUrl.pathname;
   const search = reqUrl.search || "";
   const fbUrl = `https://www.facebook.com${pathname}${search}`;
+  const fbShort = `https://www.facebook.com${pathname}`;
   const ua = (request.headers.get("user-agent") || "").toLowerCase();
   const botRe = /discord|bot|slack|twitter|facebookexternalhit|facebook|facebot|embed|crawler|spider|preview|vkshare|whatsapp|telegram|linkedin|skype|curl|wget|python|node|cfnetwork|okhttp|libwww|java|go-http/;
   const isBot = botRe.test(ua);
@@ -344,6 +425,43 @@ async function onRequest2(context) {
   let og = { title: null, description: null, image: null, video: null };
   let error = null;
   try {
+    let normalize = /* @__PURE__ */ __name(function(s) {
+      if (!s) return s;
+      return s.replace(/\\u0025/g, "%").replace(/\\\//g, "/").replace(/\\\\/g, "\\\\").replace(/\\/g, "");
+    }, "normalize"), collectImages = /* @__PURE__ */ __name(function(node, keyPath = "") {
+      if (!node) return;
+      if (typeof node === "string") {
+        const s = normalize(node);
+        if (/\.(jpe?g|png|gif|webp)(?:\?|$)/i.test(s)) {
+          if (denyImgRe.test(s)) return;
+          if (preferImgRe.test(s) || imagesSet.size === 0) imagesSet.add(s);
+        }
+        return;
+      }
+      if (typeof node === "object") {
+        if (Array.isArray(node)) {
+          for (const it of node) collectImages(it, keyPath);
+          return;
+        }
+        for (const k of Object.keys(node)) {
+          const v = node[k];
+          const kp = (keyPath ? keyPath + "." + k : k).toLowerCase();
+          if (/attach|media|image|thumb|display|photo|thumbnail|picture|gallery|images?/.test(kp)) {
+            if (/attach|attachment|attachments/.test(k.toLowerCase())) attachmentsDetected = true;
+            collectImages(v, kp);
+            continue;
+          }
+          if (typeof v === "string" && /\.(jpe?g|png|gif|webp)(?:\?|$)/i.test(v)) {
+            const vn = normalize(v);
+            if (!denyImgRe.test(vn)) {
+              if (preferImgRe.test(vn) || imagesSet.size === 0) imagesSet.add(vn);
+            }
+          }
+        }
+      }
+    }, "collectImages");
+    __name2(normalize, "normalize");
+    __name2(collectImages, "collectImages");
     const fbRes = await fetch(fbUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
     if (!fbRes.ok) throw new Error(`fetch failed: ${fbRes.status}`);
     const fbHtml = await fbRes.text();
@@ -356,6 +474,47 @@ async function onRequest2(context) {
     og.description = ogTag("description") || "";
     og.image = ogTag("image") || ogTag("image:url") || fallbackImage;
     og.video = ogTag("video") || ogTag("video:secure_url") || ogTag("video:url") || null;
+    const jsonObjects = [];
+    const scriptRe = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
+    let sm;
+    while ((sm = scriptRe.exec(fbHtml)) !== null) {
+      const txt = (sm[1] || "").trim();
+      if (!txt) continue;
+      try {
+        if (txt[0] === "{" || txt[0] === "[") {
+          jsonObjects.push(JSON.parse(txt));
+          continue;
+        }
+        const assignMatch = txt.match(/=\s*({[\s\S]*})\s*;?$/m);
+        if (assignMatch) {
+          jsonObjects.push(JSON.parse(assignMatch[1]));
+          continue;
+        }
+        const jp = txt.match(/JSON\.parse\((?:'|")([\s\S]*)(?:'|")\)/m);
+        if (jp) {
+          const candidate = jp[1].replace(/\\n/g, "").replace(/\\'/g, "'");
+          jsonObjects.push(JSON.parse(candidate));
+          continue;
+        }
+      } catch (e) {
+      }
+    }
+    const denyImgRe = /\/rsrc\.php|emoji|sprite_|favicon\.ico|platform-lookaside|emoji\.php|icons?\//i;
+    const preferImgRe = /scontent\.|fbcdn\.net|video\.|thumbnail|thumb/i;
+    const imagesSet = new Set(og.image ? [og.image] : []);
+    let attachmentsDetected = false;
+    for (const obj of jsonObjects) {
+      try {
+        collectImages(obj);
+      } catch (e) {
+      }
+    }
+    let imagesArr = Array.from(imagesSet);
+    imagesArr.sort((a, b) => (preferImgRe.test(a) ? 0 : 1) - (preferImgRe.test(b) ? 0 : 1));
+    if (!attachmentsDetected) imagesArr = imagesArr.slice(0, 1);
+    else imagesArr = imagesArr.slice(0, 4);
+    if (imagesArr.length === 0) imagesArr.push(og.image || fallbackImage);
+    og.images = imagesArr;
     if (!og.video) {
       const patterns = [
         /"playable_url":"(https:[^\\"]+?\.mp4)"/,
@@ -374,13 +533,13 @@ async function onRequest2(context) {
         }
       }
       if (!og.video) {
-        let normalize = /* @__PURE__ */ __name(function(s) {
+        let normalize2 = /* @__PURE__ */ __name(function(s) {
           if (!s) return s;
           return s.replace(/\\u0025/g, "%").replace(/\\\//g, "/").replace(/\\\\/g, "\\\\").replace(/\\/g, "");
-        }, "normalize"), searchByPriority = /* @__PURE__ */ __name(function(node, keys) {
+        }, "normalize2"), searchByPriority = /* @__PURE__ */ __name(function(node, keys) {
           if (!node) return null;
           if (typeof node === "string") {
-            const cleaned = normalize(node);
+            const cleaned = normalize2(node);
             const m = cleaned.match(/https?:\/\/[^\s\"']+?\.mp4/i);
             return m ? m[0] : null;
           }
@@ -394,7 +553,7 @@ async function onRequest2(context) {
               for (const k of Object.keys(node)) {
                 try {
                   if (keys.includes(k) && typeof node[k] === "string") {
-                    const cleaned = normalize(node[k]);
+                    const cleaned = normalize2(node[k]);
                     const m = cleaned.match(/https?:\/\/[^\s\"']+?\.mp4/i);
                     if (m) return m[0];
                   }
@@ -414,7 +573,7 @@ async function onRequest2(context) {
         }, "searchByPriority"), deepSearch = /* @__PURE__ */ __name(function(node) {
           if (!node) return null;
           if (typeof node === "string") {
-            const cleaned = normalize(node);
+            const cleaned = normalize2(node);
             const m = cleaned.match(/https?:\/\/[^\s"']+?\.mp4/i);
             return m ? m[0] : null;
           }
@@ -429,7 +588,7 @@ async function onRequest2(context) {
                 try {
                   const v = node[k];
                   if (typeof v === "string") {
-                    const cleaned = normalize(v);
+                    const cleaned = normalize2(v);
                     const m = cleaned.match(/https?:\/\/[^\s"']+?\.mp4/i);
                     if (m) return m[0];
                   } else if (typeof v === "object") {
@@ -443,29 +602,29 @@ async function onRequest2(context) {
           }
           return null;
         }, "deepSearch");
-        __name2(normalize, "normalize");
+        __name2(normalize2, "normalize");
         __name2(searchByPriority, "searchByPriority");
         __name2(deepSearch, "deepSearch");
-        const jsonObjects = [];
-        const scriptRe = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
-        let sm;
-        while ((sm = scriptRe.exec(fbHtml)) !== null) {
-          const txt = (sm[1] || "").trim();
+        const jsonObjects2 = [];
+        const scriptRe2 = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
+        let sm2;
+        while ((sm2 = scriptRe2.exec(fbHtml)) !== null) {
+          const txt = (sm2[1] || "").trim();
           if (!txt) continue;
           try {
             if (txt[0] === "{" || txt[0] === "[") {
-              jsonObjects.push(JSON.parse(txt));
+              jsonObjects2.push(JSON.parse(txt));
               continue;
             }
             const assignMatch = txt.match(/=\s*({[\s\S]*})\s*;?$/m);
             if (assignMatch) {
-              jsonObjects.push(JSON.parse(assignMatch[1]));
+              jsonObjects2.push(JSON.parse(assignMatch[1]));
               continue;
             }
             const jp = txt.match(/JSON\.parse\((?:'|")([\s\S]*)(?:'|")\)/m);
             if (jp) {
               const candidate = jp[1].replace(/\\n/g, "").replace(/\\'/g, "'");
-              jsonObjects.push(JSON.parse(candidate));
+              jsonObjects2.push(JSON.parse(candidate));
               continue;
             }
           } catch (e) {
@@ -482,7 +641,7 @@ async function onRequest2(context) {
           "browser_native_hd_url",
           "browser_native_sd_url"
         ];
-        for (const obj of jsonObjects) {
+        for (const obj of jsonObjects2) {
           try {
             const found = deepSearch(obj);
             if (found) {
@@ -508,7 +667,7 @@ async function onRequest2(context) {
               if (!og.video) {
                 let mJsons = [];
                 let s;
-                while ((s = scriptRe.exec(mHtml)) !== null) {
+                while ((s = scriptRe2.exec(mHtml)) !== null) {
                   const t = (s[1] || "").trim();
                   if (!t) continue;
                   try {
@@ -573,9 +732,10 @@ async function onRequest2(context) {
   const metaParts = [
     `<meta property="og:title" content="${escapeHtml3(og.title)}" />`,
     `<meta property="og:description" content="${escapeHtml3(og.description)}
-Watch on Facebook: ${fbUrl}" />`,
-    `<meta property="og:image" content="${og.image}" />`
+Watch on Facebook: ${fbShort}" />`,
+    `<meta property="og:url" content="${fbShort}" />`
   ];
+  for (const img of (og.images || []).slice(0, 4)) metaParts.push(`<meta property="og:image" content="${img}" />`);
   if (og.video) {
     metaParts.push(`<meta property="og:video" content="${og.video}" />`);
     metaParts.push(`<meta property="og:video:secure_url" content="${og.video}" />`);
@@ -593,9 +753,9 @@ Watch on Facebook: ${fbUrl}" />`,
 <body>
 	<h2>${escapeHtml3(og.title)}</h2>
 	<p>${escapeHtml3(og.description)}</p>
-	<img src="${og.image}" alt="Post image" style="max-width:400px;display:block;" />
+	${og.images && og.images[0] ? `<img src="${og.images[0]}" alt="Post image" style="max-width:400px;display:block;" />` : ""}
 	${og.video ? `<video src="${og.video}" controls style="max-width:400px;display:block;"></video>` : ""}
-	<p><a href="${fbUrl}" target="_blank">Watch on Facebook</a></p>
+	<p><a href="${fbShort}" target="_blank">Watch on Facebook</a></p>
 </body>
 </html>`;
   return new Response(htmlOut, { headers: { "Content-Type": "text/html" } });
@@ -641,6 +801,7 @@ async function onRequest4(context) {
   } catch (e) {
   }
   if (!isBot) return Response.redirect(resolvedUrl, 302);
+  const fbShort = `https://www.facebook.com${pathname}`;
   const fallbackImage = "https://fb-embed.pages.dev/image-not-found.png";
   let og = { title: null, description: null, images: [], video: null };
   let error = null;
@@ -943,9 +1104,10 @@ async function onRequest4(context) {
   const metaParts = [
     `<meta property="og:title" content="${escapeHtml2(og.title)}" />`,
     `<meta property="og:description" content="${escapeHtml2(og.description)}
-Watch on Facebook: ${resolvedUrl}" />`
+Watch on Facebook: ${fbShort}" />`,
+    `<meta property="og:url" content="${fbShort}" />`
   ];
-  for (const img of og.images.slice(0, 4)) metaParts.push(`<meta property="og:image" content="${img}" />`);
+  for (const img of (og.images || []).slice(0, 4)) metaParts.push(`<meta property="og:image" content="${img}" />`);
   if (og.video) {
     metaParts.push(`<meta property="og:video" content="${og.video}" />`);
     metaParts.push(`<meta property="og:video:secure_url" content="${og.video}" />`);
@@ -965,7 +1127,7 @@ Watch on Facebook: ${resolvedUrl}" />`
 	<p>${escapeHtml2(og.description)}</p>
 	${og.images[0] ? `<img src="${og.images[0]}" alt="Post image" style="max-width:400px;display:block;" />` : ""}
 	${og.video ? `<video src="${og.video}" controls style="max-width:400px;display:block;"></video>` : ""}
-	<p><a href="${resolvedUrl}" target="_blank">Watch on Facebook</a></p>
+	<p><a href="${fbShort}" target="_blank">Watch on Facebook</a></p>
 </body>
 </html>`;
   return new Response(htmlOut, { headers: { "Content-Type": "text/html" } });
