@@ -7,8 +7,11 @@ export async function onRequest(context) {
 	const id = parts[parts.length - 1];
 	if (!id) return new Response('Invalid Facebook reel path.', { status: 400 });
 
-	const fbUrl = `https://www.facebook.com/reel/${encodeURIComponent(id)}/`;
-	const fbShort = fbUrl;
+	// Prefer the public "share" endpoint which tends to include OG metadata
+	const fbShareUrl = `https://facebook.com/share/r/${encodeURIComponent(id)}/`;
+	const fbReelUrl = `https://www.facebook.com/reel/${encodeURIComponent(id)}/`;
+	const fbUrl = fbShareUrl; // prefer share URL for scraping
+	const fbShort = fbShareUrl;
 
 	const ua = (request.headers.get('user-agent') || '').toLowerCase();
 	const isBot = BOT_AGENT_RE.test(ua);
