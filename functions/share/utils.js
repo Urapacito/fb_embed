@@ -81,7 +81,8 @@ export function buildEmbedHtml(og, fbShort) {
     metaParts.push(`<meta name="twitter:card" content="player" />`);
   }
 
-  const firstImg = og.images && og.images[0] ? proxied(og.images[0]) : '';
+  const imgsToShow = (og.images || []).slice(0, 4).map(i => proxied(i));
+  const imagesHtml = imgsToShow.length > 0 ? imgsToShow.map(i => `<img src="${escapeHtml(i)}" alt="Post image" style="max-width:320px;margin:8px;display:inline-block;vertical-align:top;" />`).join('\n  ') : '';
 
   const htmlOut = `<!DOCTYPE html>
 <html lang="en">
@@ -89,12 +90,15 @@ export function buildEmbedHtml(og, fbShort) {
   <meta charset="UTF-8" />
   <title>${escapeHtml(og.title)}</title>
   ${metaParts.join('\n  ')}
+  <style>body{font-family:Arial,Helvetica,sans-serif} .images{display:flex;flex-wrap:wrap;gap:8px}</style>
 </head>
 <body>
   <h2>${escapeHtml(og.title)}</h2>
   <p>${escapeHtml(og.description)}</p>
-  ${firstImg ? `<img src="${escapeHtml(firstImg)}" alt="Post image" style="max-width:400px;display:block;" />` : ''}
-  ${og.video ? `<video src="${escapeHtml(og.video)}" controls style="max-width:400px;display:block;"></video>` : ''}
+  <div class="images">
+  ${imagesHtml}
+  </div>
+  ${og.video ? `<video src="${escapeHtml(og.video)}" controls style="max-width:400px;display:block;margin-top:8px;"></video>` : ''}
   <p><a href="${escapeHtml(fbShort)}" target="_blank">Watch on Facebook</a></p>
 </body>
 </html>`;
@@ -186,6 +190,39 @@ async function loadVideoCache() {
 export async function getCachedVideo(fbShort) {
   await loadVideoCache();
   return (VIDEO_CACHE && VIDEO_CACHE[fbShort]) ? VIDEO_CACHE[fbShort] : null;
+}
+
+// Image cache (development). Reads data/image-cache.json keyed by page URL.
+let IMAGE_CACHE = null;
+async function loadImageCache() {
+  if (IMAGE_CACHE !== null) return;
+  IMAGE_CACHE = {};
+  try {
+    if (typeof process !== 'undefined' && process.versions && process.versions.node) {
+      const fs = await import('fs');
+      try {
+        const txt = await fs.promises.readFile('data/image-cache.json', 'utf8');
+        IMAGE_CACHE = JSON.parse(txt || '{}');
+      } catch (e) {
+        IMAGE_CACHE = {};
+      }
+    } else {
+      // In non-Node runtimes (Cloudflare Pages Functions), attempt to load a bundled JS cache module
+      try {
+        const mod = await import('./image-cache.js');
+        IMAGE_CACHE = (mod && mod.default) ? mod.default : (mod || {});
+      } catch (e) {
+        IMAGE_CACHE = {};
+      }
+    }
+  } catch (e) {
+    IMAGE_CACHE = {};
+  }
+}
+
+export async function getCachedImages(fbShort) {
+  await loadImageCache();
+  return (IMAGE_CACHE && IMAGE_CACHE[fbShort]) ? IMAGE_CACHE[fbShort] : null;
 }
 
 export async function findVideoUrl(html, jsonObjects = [], referrer = 'https://www.facebook.com') {
@@ -407,6 +444,9 @@ export function collectPostImages(jsonObjects = [], primaryImage) {
     collect(obj);
   }
 
+  // If multiple distinct images were found, treat as attachments (show multiple)
+  if (imagesSet.size > 1) attachmentsDetected = true;
+
   let result = Array.from(imagesSet);
   result.sort((a, b) => (preferImgRe.test(a) ? 0 : 1) - (preferImgRe.test(b) ? 0 : 1));
   if (!attachmentsDetected) result = result.slice(0, 1); else result = result.slice(0, 4);
@@ -446,7 +486,27 @@ export async function scrapeFacebookEmbed(fbUrl, fbShort, env = {}) {
 
     const jsonObjects = extractJsonObjects(html);
     if (!og.video) {
-      og.video = await findVideoUrl(html, jsonObjects, resolvedUrl);
+      // prefer cached captured MP4s (development) before attempting extraction
+      try {
+        const cached = await getCachedVideo(fbShort);
+        if (cached) {
+          og.video = cached;
+        } else {
+          og.video = await findVideoUrl(html, jsonObjects, resolvedUrl);
+        }
+      } catch (e) {
+        og.video = await findVideoUrl(html, jsonObjects, resolvedUrl);
+      }
+    }
+
+    // prefer cached captured images (development) before attempting full extraction
+    try {
+      const cachedImgs = await getCachedImages(fbShort);
+      if (cachedImgs && Array.isArray(cachedImgs) && cachedImgs.length > 0) {
+        og.images = cachedImgs;
+      }
+    } catch (e) {
+      // ignore
     }
 
     const images = collectPostImages(jsonObjects, primaryImage);
@@ -455,6 +515,16 @@ export async function scrapeFacebookEmbed(fbUrl, fbShort, env = {}) {
       if (!images.includes(img)) images.push(img);
     }
     og.images = images.length > 0 ? images : [primaryImage];
+
+    // If we have a developer-captured image cache for this page, prefer it (preserve order)
+    try {
+      const cachedImgs = await getCachedImages(fbShort);
+      if (cachedImgs && Array.isArray(cachedImgs) && cachedImgs.length > 0) {
+        og.images = cachedImgs;
+      }
+    } catch (e) {
+      // ignore
+    }
 
     if (!og.video) {
       const mobileUrls = [
