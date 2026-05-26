@@ -34,7 +34,7 @@ export function escapeHtml(s) {
     .replace(/'/g, '&#39;');
 }
 
-export function buildEmbedHtml(og, fbShort) {
+export function buildEmbedHtml(og, fbShort, origin = null) {
   function shouldProxyImage(u) {
     if (!u) return false;
     try {
@@ -78,7 +78,8 @@ export function buildEmbedHtml(og, fbShort) {
     // Provide a player HTML endpoint on our domain so crawlers that prefer HTML players
     // can embed a playable player. Fall back to raw MP4 meta tags as well.
     try {
-      const playerUrl = `/share/player?u=${encodeURIComponent(og.video)}&r=${encodeURIComponent(fbShort)}`;
+      const playerPath = `/share/player?u=${encodeURIComponent(og.video)}&r=${encodeURIComponent(fbShort)}`;
+      const playerUrl = origin ? `${String(origin).replace(/\/$/, '')}${playerPath}` : playerPath;
       metaParts.push(`<meta property="og:video" content="${escapeHtml(playerUrl)}" />`);
       metaParts.push(`<meta property="og:video:secure_url" content="${escapeHtml(playerUrl)}" />`);
       metaParts.push(`<meta property="og:video:type" content="text/html" />`);
