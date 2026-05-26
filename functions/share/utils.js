@@ -181,6 +181,14 @@ async function loadVideoCache() {
       } catch (e) {
         VIDEO_CACHE = {};
       }
+    } else {
+      // In non-Node runtimes (Cloudflare Pages Functions), attempt to load a bundled JS cache module
+      try {
+        const mod = await import('./video-cache.js');
+        VIDEO_CACHE = (mod && mod.default) ? mod.default : (mod || {});
+      } catch (e) {
+        VIDEO_CACHE = {};
+      }
     }
   } catch (e) {
     VIDEO_CACHE = {};
@@ -395,13 +403,64 @@ export function extractRawImageUrls(html) {
       if (u) set.add(u);
     }
   }
-  return Array.from(set);
+  // Filter out UI assets, emoji, tiny icons and data URIs
+  const denyRe = /rsrc\.php|emoji|sprite_|favicon\.ico|platform-lookaside|emoji\.php|icons?\//i;
+  function looksLikeUiAsset(u) {
+    if (!u) return true;
+    const low = String(u).toLowerCase();
+    if (low.startsWith('data:')) return true;
+    if (denyRe.test(low)) return true;
+    // common emoji/static small size markers (e.g. s32, s40, p32x32, _32x32)
+    const sMatch = low.match(/s(\d{1,3})(?:x\d{1,3})?/);
+    if (sMatch) {
+      const n = parseInt(sMatch[1], 10);
+      if (!Number.isNaN(n) && n > 0 && n < 150) return true;
+    }
+    const pMatch = low.match(/p(\d{1,3})x(\d{1,3})/);
+    if (pMatch) {
+      const n = parseInt(pMatch[1], 10);
+      if (!Number.isNaN(n) && n > 0 && n < 150) return true;
+    }
+    // small width/height tokens like _32x32_ or _40x40_
+    const whMatch = low.match(/_(\d{1,3})x(\d{1,3})_/);
+    if (whMatch) {
+      const n = parseInt(whMatch[1], 10);
+      if (!Number.isNaN(n) && n > 0 && n < 150) return true;
+    }
+    return false;
+  }
+
+  return Array.from(set).filter(u => !looksLikeUiAsset(u));
 }
 
 export function collectPostImages(jsonObjects = [], primaryImage) {
   const denyImgRe = /\/rsrc\.php|emoji|sprite_|favicon\.ico|platform-lookaside|emoji\.php|icons?\//i;
   const preferImgRe = /scontent\.|fbcdn\.net|video\.|thumbnail|thumb/i;
-  const imagesSet = new Set(primaryImage ? [primaryImage] : []);
+  function isUiAsset(u) {
+    if (!u) return true;
+    const low = String(u).toLowerCase();
+    if (denyImgRe.test(low)) return true;
+    if (low.startsWith('data:')) return true;
+    const sMatch = low.match(/s(\d{1,3})(?:x\d{1,3})?/);
+    if (sMatch) {
+      const n = parseInt(sMatch[1], 10);
+      if (!Number.isNaN(n) && n > 0 && n < 150) return true;
+    }
+    const pMatch = low.match(/p(\d{1,3})x(\d{1,3})/);
+    if (pMatch) {
+      const n = parseInt(pMatch[1], 10);
+      if (!Number.isNaN(n) && n > 0 && n < 150) return true;
+    }
+    const whMatch = low.match(/_(\d{1,3})x(\d{1,3})_/);
+    if (whMatch) {
+      const n = parseInt(whMatch[1], 10);
+      if (!Number.isNaN(n) && n > 0 && n < 150) return true;
+    }
+    return false;
+  }
+
+  const imagesSet = new Set();
+  if (primaryImage && !isUiAsset(primaryImage)) imagesSet.add(primaryImage);
   let attachmentsDetected = false;
 
   function collect(node, keyPath = '') {
@@ -409,7 +468,7 @@ export function collectPostImages(jsonObjects = [], primaryImage) {
     if (typeof node === 'string') {
       const value = normalizeUrl(node);
       if (value && /\.(jpe?g|png|gif|webp)(?:\?|$)/i.test(value)) {
-        if (denyImgRe.test(value)) return;
+        if (isUiAsset(value)) return;
         if (preferImgRe.test(value) || imagesSet.size === 0) imagesSet.add(value);
       }
       return;
@@ -432,7 +491,7 @@ export function collectPostImages(jsonObjects = [], primaryImage) {
         }
         if (typeof value === 'string' && /\.(jpe?g|png|gif|webp)(?:\?|$)/i.test(value)) {
           const normalized = normalizeUrl(value);
-          if (normalized && !denyImgRe.test(normalized)) {
+          if (normalized && !isUiAsset(normalized)) {
             if (preferImgRe.test(normalized) || imagesSet.size === 0) imagesSet.add(normalized);
           }
         }
@@ -503,7 +562,24 @@ export async function scrapeFacebookEmbed(fbUrl, fbShort, env = {}) {
     try {
       const cachedImgs = await getCachedImages(fbShort);
       if (cachedImgs && Array.isArray(cachedImgs) && cachedImgs.length > 0) {
-        og.images = cachedImgs;
+        const filtered = (cachedImgs || []).filter(u => {
+          if (!u) return false;
+          const low = String(u).toLowerCase();
+          if (/rsrc\.php|emoji|sprite_|favicon\.ico|platform-lookaside|emoji\.php|icons?\//i.test(low)) return false;
+          if (low.startsWith('data:')) return false;
+          const sMatch = low.match(/s(\d{1,3})(?:x\d{1,3})?/);
+          if (sMatch) {
+            const n = parseInt(sMatch[1], 10);
+            if (!Number.isNaN(n) && n > 0 && n < 150) return false;
+          }
+          const pMatch = low.match(/p(\d{1,3})x(\d{1,3})/);
+          if (pMatch) {
+            const n = parseInt(pMatch[1], 10);
+            if (!Number.isNaN(n) && n > 0 && n < 150) return false;
+          }
+          return true;
+        });
+        if (filtered.length > 0) og.images = filtered;
       }
     } catch (e) {
       // ignore
@@ -514,13 +590,54 @@ export async function scrapeFacebookEmbed(fbUrl, fbShort, env = {}) {
     for (const img of rawImages) {
       if (!images.includes(img)) images.push(img);
     }
-    og.images = images.length > 0 ? images : [primaryImage];
+
+    function isUiAssetUrl(u) {
+      if (!u) return true;
+      const low = String(u).toLowerCase();
+      if (/rsrc\.php|emoji|sprite_|favicon\.ico|platform-lookaside|emoji\.php|icons?\//i.test(low)) return true;
+      if (low.startsWith('data:')) return true;
+      const sMatch = low.match(/s(\d{1,3})(?:x\d{1,3})?/);
+      if (sMatch) {
+        const n = parseInt(sMatch[1], 10);
+        if (!Number.isNaN(n) && n > 0 && n < 150) return true;
+      }
+      const pMatch = low.match(/p(\d{1,3})x(\d{1,3})/);
+      if (pMatch) {
+        const n = parseInt(pMatch[1], 10);
+        if (!Number.isNaN(n) && n > 0 && n < 150) return true;
+      }
+      return false;
+    }
+
+    let finalImages = images.length > 0 ? images : [];
+    if (finalImages.length === 0) {
+      if (primaryImage && !isUiAssetUrl(primaryImage)) finalImages.push(primaryImage);
+      else finalImages.push(fallbackImage);
+    }
+    og.images = finalImages;
 
     // If we have a developer-captured image cache for this page, prefer it (preserve order)
     try {
       const cachedImgs = await getCachedImages(fbShort);
       if (cachedImgs && Array.isArray(cachedImgs) && cachedImgs.length > 0) {
-        og.images = cachedImgs;
+        const filtered = (cachedImgs || []).filter(u => {
+          if (!u) return false;
+          const low = String(u).toLowerCase();
+          if (/rsrc\.php|emoji|sprite_|favicon\.ico|platform-lookaside|emoji\.php|icons?\//i.test(low)) return false;
+          if (low.startsWith('data:')) return false;
+          const sMatch = low.match(/s(\d{1,3})(?:x\d{1,3})?/);
+          if (sMatch) {
+            const n = parseInt(sMatch[1], 10);
+            if (!Number.isNaN(n) && n > 0 && n < 150) return false;
+          }
+          const pMatch = low.match(/p(\d{1,3})x(\d{1,3})/);
+          if (pMatch) {
+            const n = parseInt(pMatch[1], 10);
+            if (!Number.isNaN(n) && n > 0 && n < 150) return false;
+          }
+          return true;
+        });
+        if (filtered.length > 0) og.images = filtered;
       }
     } catch (e) {
       // ignore
