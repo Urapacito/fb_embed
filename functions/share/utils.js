@@ -75,10 +75,27 @@ export function buildEmbedHtml(og, fbShort) {
   }
 
   if (og.video) {
+    // Provide a player HTML endpoint on our domain so crawlers that prefer HTML players
+    // can embed a playable player. Fall back to raw MP4 meta tags as well.
+    try {
+      const playerUrl = `/share/player?u=${encodeURIComponent(og.video)}&r=${encodeURIComponent(fbShort)}`;
+      metaParts.push(`<meta property="og:video" content="${escapeHtml(playerUrl)}" />`);
+      metaParts.push(`<meta property="og:video:secure_url" content="${escapeHtml(playerUrl)}" />`);
+      metaParts.push(`<meta property="og:video:type" content="text/html" />`);
+      metaParts.push(`<meta property="og:video:width" content="640" />`);
+      metaParts.push(`<meta property="og:video:height" content="360" />`);
+      metaParts.push(`<meta name="twitter:card" content="player" />`);
+      metaParts.push(`<meta name="twitter:player" content="${escapeHtml(playerUrl)}" />`);
+      metaParts.push(`<meta name="twitter:player:width" content="640" />`);
+      metaParts.push(`<meta name="twitter:player:height" content="360" />`);
+    } catch (e) {
+      // ignore playerUrl build errors
+    }
+
+    // Also include raw MP4 tags for crawlers that accept direct video URLs
     metaParts.push(`<meta property="og:video" content="${escapeHtml(og.video)}" />`);
     metaParts.push(`<meta property="og:video:secure_url" content="${escapeHtml(og.video)}" />`);
     metaParts.push(`<meta property="og:video:type" content="video/mp4" />`);
-    metaParts.push(`<meta name="twitter:card" content="player" />`);
   }
 
   const imgsToShow = (og.images || []).slice(0, 4).map(i => proxied(i));
