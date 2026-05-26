@@ -18,6 +18,7 @@ export async function onRequest(context) {
 	if (!isBot) return Response.redirect(fbUrl, 302);
 
 	const { og } = await scrapeFacebookEmbed(fbUrl, fbShort, context.env);
-	const html = buildEmbedHtml(og, fbShort);
+	const origin = new URL(request.url).origin;
+	const html = buildEmbedHtml(og, fbShort, origin);
 	return new Response(html, { headers: { 'Content-Type': 'text/html' } });
 }

@@ -8,7 +8,8 @@ const fbShort = normalizeUrl(url) || url;
     console.log('TEST_URL:', url);
     const result = await scrapeFacebookEmbed(url, fbShort, { FB_ACCESS_TOKEN: process.env.FB_ACCESS_TOKEN });
     console.log(JSON.stringify(result, null, 2));
-    const html = buildEmbedHtml(result.og, fbShort);
+    const origin = process.env.EMBED_ORIGIN || 'https://fb-embed.pages.dev';
+    const html = buildEmbedHtml(result.og, fbShort, origin);
     console.log('\n--- GENERATED HTML ---\n');
     console.log(html);
   } catch (err) {
