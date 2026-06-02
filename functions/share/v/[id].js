@@ -7,8 +7,10 @@ export async function onRequest(context) {
 	const id = parts[parts.length - 1];
 	if (!id) return new Response('Invalid Facebook video path.', { status: 400 });
 
+	// public FB watch URL for redirect
 	const fbUrl = `https://www.facebook.com/watch/?v=${encodeURIComponent(id)}`;
-	const fbShort = fbUrl;
+	// canonical share path for cached lookup
+	const fbShort = `https://www.facebook.com/share/v/${encodeURIComponent(id)}/`;
 
 	const ua = (request.headers.get('user-agent') || '').toLowerCase();
 	const isBot = BOT_AGENT_RE.test(ua);

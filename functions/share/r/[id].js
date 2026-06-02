@@ -7,8 +7,10 @@ export async function onRequest(context) {
 	const id = parts[parts.length - 1];
 	if (!id) return new Response('Invalid Facebook reel path.', { status: 400 });
 
+	// public FB URL for redirects
 	const fbUrl = `https://www.facebook.com/reel/${encodeURIComponent(id)}/`;
-	const fbShort = fbUrl;
+	// use canonical share path as the fbShort so it matches cached keys
+	const fbShort = `https://www.facebook.com/share/r/${encodeURIComponent(id)}/`;
 
 	const ua = (request.headers.get('user-agent') || '').toLowerCase();
 	const isBot = BOT_AGENT_RE.test(ua);
