@@ -1,4 +1,4 @@
-import { BOT_AGENT_RE, scrapeFacebookEmbed, buildEmbedHtml } from '../utils.js';
+import { BOT_AGENT_RE, scrapeFacebookEmbed, buildEmbedHtml } from '../share/utils.js';  
 
 export async function onRequest(context) {
 	const { request } = context;
@@ -15,7 +15,6 @@ export async function onRequest(context) {
 	if (!isBot) return Response.redirect(fbUrl, 302);
 
 	const { og } = await scrapeFacebookEmbed(fbUrl, fbShort, context.env);
-	const origin = new URL(request.url).origin;
-	const html = buildEmbedHtml(og, fbShort, origin);
+	const html = buildEmbedHtml(og, fbShort);
 	return new Response(html, { headers: { 'Content-Type': 'text/html' } });
 }

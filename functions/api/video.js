@@ -1,3 +1,49 @@
+import { normalizeUrl } from '../share/utils.js';
+
+export async function onRequest(context) {
+  const { request } = context;
+  const url = new URL(request.url);
+  const u = url.searchParams.get('u');
+  const r = url.searchParams.get('r') || '';
+  if (!u) return new Response('Missing video url', { status: 400 });
+
+  const raw = decodeURIComponent(u || '');
+  const cleaned = normalizeUrl(raw) || raw;
+  let upstream;
+  try {
+    upstream = new URL(cleaned);
+    if (!/^https?:\/\//i.test(upstream.toString())) throw new Error('invalid');
+  } catch (e) {
+    return new Response('Invalid video url', { status: 400 });
+  }
+
+  const headers = {
+    'User-Agent': request.headers.get('user-agent') || 'Mozilla/5.0',
+  };
+  if (r) headers['Referer'] = decodeURIComponent(r);
+  const range = request.headers.get('range');
+  if (range) headers['Range'] = range;
+
+  try {
+    const upstreamRes = await fetch(upstream.toString(), { method: 'GET', headers, redirect: 'follow' });
+    const respHeaders = new Headers();
+    const ct = upstreamRes.headers.get('content-type') || 'video/mp4';
+    respHeaders.set('Content-Type', ct);
+    const cl = upstreamRes.headers.get('content-length');
+    if (cl) respHeaders.set('Content-Length', cl);
+    const cr = upstreamRes.headers.get('content-range');
+    if (cr) respHeaders.set('Content-Range', cr);
+    const ar = upstreamRes.headers.get('accept-ranges');
+    if (ar) respHeaders.set('Accept-Ranges', ar);
+    respHeaders.set('Cache-Control', upstreamRes.headers.get('cache-control') || 'public, max-age=31536000, immutable');
+    respHeaders.set('Access-Control-Allow-Origin', '*');
+    respHeaders.set('Access-Control-Allow-Headers', 'Range');
+
+    return new Response(upstreamRes.body, { status: upstreamRes.status, headers: respHeaders });
+  } catch (e) {
+    return new Response('Video proxy failed', { status: 502 });
+  }
+}
 export async function onRequest(context) {
   const { request } = context;
   const url = new URL(request.url);

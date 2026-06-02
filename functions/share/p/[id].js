@@ -1,4 +1,4 @@
-import { BOT_AGENT_RE, scrapeFacebookEmbed, buildEmbedHtml } from '../utils.js';
+import { BOT_AGENT_RE, scrapeFacebookEmbed, buildEmbedHtml } from '../share/utils.js';
 
 export async function onRequest(context) {
 	const { request } = context;

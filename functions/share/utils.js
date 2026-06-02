@@ -63,9 +63,28 @@ export function buildEmbedHtml(og, fbShort, origin = null) {
     return u;
   }
 
+  function decodeHtmlEntitiesLocal(s) {
+    if (!s) return '';
+    try {
+      return String(s)
+        .replace(/&amp;/g, '&')
+        .replace(/&#x([0-9A-Fa-f]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+        .replace(/&#([0-9]+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)))
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'");
+    } catch (e) {
+      return String(s);
+    }
+  }
+
+  const titleDecoded = decodeHtmlEntitiesLocal(og.title || '');
+  const descDecoded = decodeHtmlEntitiesLocal(og.description || '');
+
   const metaParts = [
-    `<meta property="og:title" content="${escapeHtml(og.title)}" />`,
-    `<meta property="og:description" content="${escapeHtml(og.description)}\nWatch on Facebook: ${escapeHtml(fbShort)}" />`,
+    `<meta property="og:title" content="${escapeHtml(titleDecoded)}" />`,
+    `<meta property="og:description" content="${escapeHtml(descDecoded)}\nWatch on Facebook: ${escapeHtml(fbShort)}" />`,
     `<meta property="og:url" content="${escapeHtml(fbShort)}" />`,
   ];
 
@@ -75,8 +94,7 @@ export function buildEmbedHtml(og, fbShort, origin = null) {
   }
 
   if (og.video) {
-    // Provide a player HTML endpoint on our domain so crawlers that prefer HTML players
-    // can embed a playable player. Fall back to raw MP4 meta tags as well.
+    // player URL on our domain (absolute when origin provided)
     try {
       const playerPath = `/share/player?u=${encodeURIComponent(og.video)}&r=${encodeURIComponent(fbShort)}`;
       const playerUrl = origin ? `${String(origin).replace(/\/$/, '')}${playerPath}` : playerPath;
@@ -89,34 +107,66 @@ export function buildEmbedHtml(og, fbShort, origin = null) {
       metaParts.push(`<meta name="twitter:player" content="${escapeHtml(playerUrl)}" />`);
       metaParts.push(`<meta name="twitter:player:width" content="640" />`);
       metaParts.push(`<meta name="twitter:player:height" content="360" />`);
+      // Additionally expose a proxied direct MP4 URL (same origin) so crawlers like Discord can fetch the video
+      if (origin) {
+        const proxiedMp4 = `${String(origin).replace(/\/$/, '')}/api/video?u=${encodeURIComponent(og.video)}&r=${encodeURIComponent(fbShort)}`;
+        metaParts.push(`<meta property="og:video" content="${escapeHtml(proxiedMp4)}" />`);
+        metaParts.push(`<meta property="og:video:secure_url" content="${escapeHtml(proxiedMp4)}" />`);
+        metaParts.push(`<meta property="og:video:type" content="video/mp4" />`);
+      }
     } catch (e) {
-      // ignore playerUrl build errors
+      // ignore
     }
 
-    // Also include raw MP4 tags for crawlers that accept direct video URLs
-    metaParts.push(`<meta property="og:video" content="${escapeHtml(og.video)}" />`);
-    metaParts.push(`<meta property="og:video:secure_url" content="${escapeHtml(og.video)}" />`);
-    metaParts.push(`<meta property="og:video:type" content="video/mp4" />`);
+    // raw mp4 fallback (use original URL when origin/proxy not available)
+    if (!origin) {
+      metaParts.push(`<meta property="og:video" content="${escapeHtml(og.video)}" />`);
+      metaParts.push(`<meta property="og:video:secure_url" content="${escapeHtml(og.video)}" />`);
+      metaParts.push(`<meta property="og:video:type" content="video/mp4" />`);
+    }
   }
 
-  const imgsToShow = (og.images || []).slice(0, 4).map(i => proxied(i));
-  const imagesHtml = imgsToShow.length > 0 ? imgsToShow.map(i => `<img src="${escapeHtml(i)}" alt="Post image" style="max-width:320px;margin:8px;display:inline-block;vertical-align:top;" />`).join('\n  ') : '';
+  const firstImg = og.images && og.images[0] ? proxied(og.images[0]) : '';
+
+  // Extract simple view and reaction counts from the title for display
+  function extractCountsFromTitle(title) {
+    if (!title) return {};
+    const out = {};
+    try {
+      const viewRe = /([0-9,.KM]+)\s*(?:l(?:ư|u)ợt)?\s*xem/i;
+      const heartRe = /([0-9,.KM]+)\s*c(?:ả|a)m\s*x(?:ú|u)c/i;
+      const v = title.match(viewRe);
+      const h = title.match(heartRe);
+      if (v) out.view = v[1];
+      if (h) out.heart = h[1];
+    } catch (e) {
+      // ignore
+    }
+    return out;
+  }
+
+  const counts = extractCountsFromTitle(titleDecoded);
+  const statsHtml = (counts.view || counts.heart) ? `
+    <div class="post-stats" style="display:flex;gap:12px;align-items:center;margin:8px 0;color:#666">
+      ${counts.view ? `<span class="stat-view" style="display:flex;align-items:center;gap:6px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 5C7 5 2.73 8.11 1 12c1.73 3.89 6 7 11 7s9.27-3.11 11-7c-1.73-3.89-6-7-11-7zm0 12a5 5 0 100-10 5 5 0 000 10z" fill="#444"/><circle cx="12" cy="12" r="2.5" fill="#444"/></svg><strong style="font-weight:600;color:#222">${escapeHtml(counts.view)}</strong><span style="font-size:0.9em">lượt xem</span></span>` : ''}
+      ${counts.heart ? `<span class="stat-heart" style="display:flex;align-items:center;gap:6px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12.1 21.35l-1.1-1.02C5.14 15.24 2 12.39 2 8.5 2 6 3.99 4 6.5 4c1.74 0 3.41.81 4.5 2.09C12.09 4.81 13.76 4 15.5 4 18.01 4 20 6 20 8.5c0 3.89-3.14 6.74-8.9 11.83l-1.0 0.02z" fill="#c62828"/></svg><strong style="font-weight:600;color:#222">${escapeHtml(counts.heart)}</strong><span style="font-size:0.9em">cảm xúc</span></span>` : ''}
+    </div>
+  ` : '';
 
   const htmlOut = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>${escapeHtml(og.title)}</title>
+  <title>${escapeHtml(titleDecoded)}</title>
   ${metaParts.join('\n  ')}
   <style>body{font-family:Arial,Helvetica,sans-serif} .images{display:flex;flex-wrap:wrap;gap:8px}</style>
 </head>
 <body>
-  <h2>${escapeHtml(og.title)}</h2>
-  <p>${escapeHtml(og.description)}</p>
-  <div class="images">
-  ${imagesHtml}
-  </div>
-  ${og.video ? `<video src="${escapeHtml(og.video)}" controls style="max-width:400px;display:block;margin-top:8px;"></video>` : ''}
+  <h2>${escapeHtml(titleDecoded)}</h2>
+  ${statsHtml}
+  <p>${escapeHtml(descDecoded)}</p>
+  ${firstImg ? `<img src="${escapeHtml(firstImg)}" alt="Post image" style="max-width:400px;display:block;" />` : ''}
+  ${og.video ? `<video src="${escapeHtml(origin ? `${String(origin).replace(/\/$/, '')}/api/video?u=${encodeURIComponent(og.video)}&r=${encodeURIComponent(fbShort)}` : og.video)}" controls style="max-width:400px;display:block;"></video>` : ''}
   <p><a href="${escapeHtml(fbShort)}" target="_blank">Watch on Facebook</a></p>
 </body>
 </html>`;
@@ -199,14 +249,6 @@ async function loadVideoCache() {
       } catch (e) {
         VIDEO_CACHE = {};
       }
-    } else {
-      // In non-Node runtimes (Cloudflare Pages Functions), attempt to load a bundled JS cache module
-      try {
-        const mod = await import('./video-cache.js');
-        VIDEO_CACHE = (mod && mod.default) ? mod.default : (mod || {});
-      } catch (e) {
-        VIDEO_CACHE = {};
-      }
     }
   } catch (e) {
     VIDEO_CACHE = {};
@@ -218,37 +260,81 @@ export async function getCachedVideo(fbShort) {
   return (VIDEO_CACHE && VIDEO_CACHE[fbShort]) ? VIDEO_CACHE[fbShort] : null;
 }
 
-// Image cache (development). Reads data/image-cache.json keyed by page URL.
-let IMAGE_CACHE = null;
-async function loadImageCache() {
-  if (IMAGE_CACHE !== null) return;
-  IMAGE_CACHE = {};
+// Return all cached videos whose cache key path matches the provided fbShort path.
+export async function getAllCachedVideosForPath(fbShort) {
+  await loadVideoCache();
+  const out = new Set();
   try {
-    if (typeof process !== 'undefined' && process.versions && process.versions.node) {
-      const fs = await import('fs');
+    const path = new URL(fbShort).pathname.replace(/\/$/, '');
+    for (const k of Object.keys(VIDEO_CACHE || {})) {
       try {
-        const txt = await fs.promises.readFile('data/image-cache.json', 'utf8');
-        IMAGE_CACHE = JSON.parse(txt || '{}');
+        const kp = new URL(k);
+        const kpPath = kp.pathname.replace(/\/$/, '');
+        if (kpPath.includes(path) || path.includes(kpPath)) out.add(VIDEO_CACHE[k]);
       } catch (e) {
-        IMAGE_CACHE = {};
-      }
-    } else {
-      // In non-Node runtimes (Cloudflare Pages Functions), attempt to load a bundled JS cache module
-      try {
-        const mod = await import('./image-cache.js');
-        IMAGE_CACHE = (mod && mod.default) ? mod.default : (mod || {});
-      } catch (e) {
-        IMAGE_CACHE = {};
+        if (typeof k === 'string' && k.includes(path)) out.add(VIDEO_CACHE[k]);
       }
     }
   } catch (e) {
-    IMAGE_CACHE = {};
+    // ignore malformed fbShort
   }
+  return Array.from(out);
 }
 
-export async function getCachedImages(fbShort) {
-  await loadImageCache();
-  return (IMAGE_CACHE && IMAGE_CACHE[fbShort]) ? IMAGE_CACHE[fbShort] : null;
+async function probeVideoUrl(candidate, referrer = 'https://www.facebook.com') {
+  if (!candidate) return null;
+  const baseHeaders = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Referer': referrer,
+    'Accept': '*/*',
+  };
+
+  async function headCheck(u) {
+    try {
+      const res = await fetch(u, { method: 'HEAD', headers: baseHeaders, redirect: 'follow' });
+      if (!res) return null;
+      const ct = (res.headers.get && res.headers.get('content-type')) || '';
+      if (!ct || !/video/i.test(ct)) return null;
+      let len = null;
+      const cl = res.headers.get && (res.headers.get('content-length') || res.headers.get('Content-Length'));
+      if (cl) len = parseInt(cl, 10);
+      const cr = res.headers.get && res.headers.get('content-range');
+      if ((!len || isNaN(len)) && cr) {
+        const m = String(cr).match(/\/(\d+)$/);
+        if (m) len = parseInt(m[1], 10);
+      }
+      return { url: u, contentType: ct, length: len };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function rangeCheck(u) {
+    try {
+      const r = await fetch(u, { method: 'GET', headers: { ...baseHeaders, Range: 'bytes=0-1' }, redirect: 'follow' });
+      if (!r) return null;
+      const ok = r.status === 206 || (r.ok && r.status === 200);
+      if (!ok) return null;
+      const ct = (r.headers.get && r.headers.get('content-type')) || '';
+      if (!ct || !/video/i.test(ct)) return null;
+      let len = null;
+      const cr = r.headers.get && r.headers.get('content-range');
+      if (cr) {
+        const m = String(cr).match(/\/(\d+)$/);
+        if (m) len = parseInt(m[1], 10);
+      }
+      const cl = r.headers.get && (r.headers.get('content-length') || r.headers.get('Content-Length'));
+      if ((!len || isNaN(len)) && cl) len = parseInt(cl, 10);
+      return { url: u, contentType: ct, length: len };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // prefer HEAD, fallback to ranged GET
+  let info = await headCheck(candidate);
+  if (!info) info = await rangeCheck(candidate);
+  return info;
 }
 
 export async function findVideoUrl(html, jsonObjects = [], referrer = 'https://www.facebook.com') {
@@ -421,64 +507,13 @@ export function extractRawImageUrls(html) {
       if (u) set.add(u);
     }
   }
-  // Filter out UI assets, emoji, tiny icons and data URIs
-  const denyRe = /rsrc\.php|emoji|sprite_|favicon\.ico|platform-lookaside|emoji\.php|icons?\//i;
-  function looksLikeUiAsset(u) {
-    if (!u) return true;
-    const low = String(u).toLowerCase();
-    if (low.startsWith('data:')) return true;
-    if (denyRe.test(low)) return true;
-    // common emoji/static small size markers (e.g. s32, s40, p32x32, _32x32)
-    const sMatch = low.match(/s(\d{1,3})(?:x\d{1,3})?/);
-    if (sMatch) {
-      const n = parseInt(sMatch[1], 10);
-      if (!Number.isNaN(n) && n > 0 && n < 150) return true;
-    }
-    const pMatch = low.match(/p(\d{1,3})x(\d{1,3})/);
-    if (pMatch) {
-      const n = parseInt(pMatch[1], 10);
-      if (!Number.isNaN(n) && n > 0 && n < 150) return true;
-    }
-    // small width/height tokens like _32x32_ or _40x40_
-    const whMatch = low.match(/_(\d{1,3})x(\d{1,3})_/);
-    if (whMatch) {
-      const n = parseInt(whMatch[1], 10);
-      if (!Number.isNaN(n) && n > 0 && n < 150) return true;
-    }
-    return false;
-  }
-
-  return Array.from(set).filter(u => !looksLikeUiAsset(u));
+  return Array.from(set);
 }
 
 export function collectPostImages(jsonObjects = [], primaryImage) {
   const denyImgRe = /\/rsrc\.php|emoji|sprite_|favicon\.ico|platform-lookaside|emoji\.php|icons?\//i;
   const preferImgRe = /scontent\.|fbcdn\.net|video\.|thumbnail|thumb/i;
-  function isUiAsset(u) {
-    if (!u) return true;
-    const low = String(u).toLowerCase();
-    if (denyImgRe.test(low)) return true;
-    if (low.startsWith('data:')) return true;
-    const sMatch = low.match(/s(\d{1,3})(?:x\d{1,3})?/);
-    if (sMatch) {
-      const n = parseInt(sMatch[1], 10);
-      if (!Number.isNaN(n) && n > 0 && n < 150) return true;
-    }
-    const pMatch = low.match(/p(\d{1,3})x(\d{1,3})/);
-    if (pMatch) {
-      const n = parseInt(pMatch[1], 10);
-      if (!Number.isNaN(n) && n > 0 && n < 150) return true;
-    }
-    const whMatch = low.match(/_(\d{1,3})x(\d{1,3})_/);
-    if (whMatch) {
-      const n = parseInt(whMatch[1], 10);
-      if (!Number.isNaN(n) && n > 0 && n < 150) return true;
-    }
-    return false;
-  }
-
-  const imagesSet = new Set();
-  if (primaryImage && !isUiAsset(primaryImage)) imagesSet.add(primaryImage);
+  const imagesSet = new Set(primaryImage ? [primaryImage] : []);
   let attachmentsDetected = false;
 
   function collect(node, keyPath = '') {
@@ -486,7 +521,7 @@ export function collectPostImages(jsonObjects = [], primaryImage) {
     if (typeof node === 'string') {
       const value = normalizeUrl(node);
       if (value && /\.(jpe?g|png|gif|webp)(?:\?|$)/i.test(value)) {
-        if (isUiAsset(value)) return;
+        if (denyImgRe.test(value)) return;
         if (preferImgRe.test(value) || imagesSet.size === 0) imagesSet.add(value);
       }
       return;
@@ -509,7 +544,7 @@ export function collectPostImages(jsonObjects = [], primaryImage) {
         }
         if (typeof value === 'string' && /\.(jpe?g|png|gif|webp)(?:\?|$)/i.test(value)) {
           const normalized = normalizeUrl(value);
-          if (normalized && !isUiAsset(normalized)) {
+          if (normalized && !denyImgRe.test(normalized)) {
             if (preferImgRe.test(normalized) || imagesSet.size === 0) imagesSet.add(normalized);
           }
         }
@@ -521,12 +556,9 @@ export function collectPostImages(jsonObjects = [], primaryImage) {
     collect(obj);
   }
 
-  // If multiple distinct images were found, treat as attachments (show multiple)
-  if (imagesSet.size > 1) attachmentsDetected = true;
-
   let result = Array.from(imagesSet);
   result.sort((a, b) => (preferImgRe.test(a) ? 0 : 1) - (preferImgRe.test(b) ? 0 : 1));
-  if (!attachmentsDetected) result = result.slice(0, 1); else result = result.slice(0, 4);
+  if (!attachmentsDetected) result = result.slice(0, 1);
   return result;
 }
 
@@ -561,46 +593,35 @@ export async function scrapeFacebookEmbed(fbUrl, fbShort, env = {}) {
     og.images = [primaryImage];
     og.video = normalizeUrl(meta.video || meta['video'] || meta['video:url'] || meta['video:secure_url'] || meta['video:video']);
 
-    const jsonObjects = extractJsonObjects(html);
-    if (!og.video) {
-      // prefer cached captured MP4s (development) before attempting extraction
-      try {
-        const cached = await getCachedVideo(fbShort);
-        if (cached) {
-          og.video = cached;
-        } else {
-          og.video = await findVideoUrl(html, jsonObjects, resolvedUrl);
-        }
-      } catch (e) {
-        og.video = await findVideoUrl(html, jsonObjects, resolvedUrl);
-      }
-    }
-
-    // prefer cached captured images (development) before attempting full extraction
+    // Prefer cached captures (if present) and probe them to pick the best available video.
     try {
-      const cachedImgs = await getCachedImages(fbShort);
-      if (cachedImgs && Array.isArray(cachedImgs) && cachedImgs.length > 0) {
-        const filtered = (cachedImgs || []).filter(u => {
-          if (!u) return false;
-          const low = String(u).toLowerCase();
-          if (/rsrc\.php|emoji|sprite_|favicon\.ico|platform-lookaside|emoji\.php|icons?\//i.test(low)) return false;
-          if (low.startsWith('data:')) return false;
-          const sMatch = low.match(/s(\d{1,3})(?:x\d{1,3})?/);
-          if (sMatch) {
-            const n = parseInt(sMatch[1], 10);
-            if (!Number.isNaN(n) && n > 0 && n < 150) return false;
+      const cachedCandidates = [];
+      const cachedExact = await getCachedVideo(fbShort);
+      if (cachedExact) cachedCandidates.push(cachedExact);
+      const more = await getAllCachedVideosForPath(fbShort);
+      for (const c of more) if (c && !cachedCandidates.includes(c)) cachedCandidates.push(c);
+      if (cachedCandidates.length > 0) {
+        const probes = [];
+        for (const cand of cachedCandidates) {
+          try {
+            const p = await probeVideoUrl(cand, resolvedUrl);
+            if (p && p.contentType && /video/i.test(p.contentType)) probes.push(p);
+          } catch (e) {
+            // ignore probe errors
           }
-          const pMatch = low.match(/p(\d{1,3})x(\d{1,3})/);
-          if (pMatch) {
-            const n = parseInt(pMatch[1], 10);
-            if (!Number.isNaN(n) && n > 0 && n < 150) return false;
-          }
-          return true;
-        });
-        if (filtered.length > 0) og.images = filtered;
+        }
+        if (probes.length > 0) {
+          probes.sort((a, b) => (b.length || 0) - (a.length || 0));
+          og.video = probes[0].url;
+        }
       }
     } catch (e) {
-      // ignore
+      // ignore cache probing errors
+    }
+
+    const jsonObjects = extractJsonObjects(html);
+    if (!og.video) {
+      og.video = await findVideoUrl(html, jsonObjects, resolvedUrl);
     }
 
     const images = collectPostImages(jsonObjects, primaryImage);
@@ -608,58 +629,7 @@ export async function scrapeFacebookEmbed(fbUrl, fbShort, env = {}) {
     for (const img of rawImages) {
       if (!images.includes(img)) images.push(img);
     }
-
-    function isUiAssetUrl(u) {
-      if (!u) return true;
-      const low = String(u).toLowerCase();
-      if (/rsrc\.php|emoji|sprite_|favicon\.ico|platform-lookaside|emoji\.php|icons?\//i.test(low)) return true;
-      if (low.startsWith('data:')) return true;
-      const sMatch = low.match(/s(\d{1,3})(?:x\d{1,3})?/);
-      if (sMatch) {
-        const n = parseInt(sMatch[1], 10);
-        if (!Number.isNaN(n) && n > 0 && n < 150) return true;
-      }
-      const pMatch = low.match(/p(\d{1,3})x(\d{1,3})/);
-      if (pMatch) {
-        const n = parseInt(pMatch[1], 10);
-        if (!Number.isNaN(n) && n > 0 && n < 150) return true;
-      }
-      return false;
-    }
-
-    let finalImages = images.length > 0 ? images : [];
-    if (finalImages.length === 0) {
-      if (primaryImage && !isUiAssetUrl(primaryImage)) finalImages.push(primaryImage);
-      else finalImages.push(fallbackImage);
-    }
-    og.images = finalImages;
-
-    // If we have a developer-captured image cache for this page, prefer it (preserve order)
-    try {
-      const cachedImgs = await getCachedImages(fbShort);
-      if (cachedImgs && Array.isArray(cachedImgs) && cachedImgs.length > 0) {
-        const filtered = (cachedImgs || []).filter(u => {
-          if (!u) return false;
-          const low = String(u).toLowerCase();
-          if (/rsrc\.php|emoji|sprite_|favicon\.ico|platform-lookaside|emoji\.php|icons?\//i.test(low)) return false;
-          if (low.startsWith('data:')) return false;
-          const sMatch = low.match(/s(\d{1,3})(?:x\d{1,3})?/);
-          if (sMatch) {
-            const n = parseInt(sMatch[1], 10);
-            if (!Number.isNaN(n) && n > 0 && n < 150) return false;
-          }
-          const pMatch = low.match(/p(\d{1,3})x(\d{1,3})/);
-          if (pMatch) {
-            const n = parseInt(pMatch[1], 10);
-            if (!Number.isNaN(n) && n > 0 && n < 150) return false;
-          }
-          return true;
-        });
-        if (filtered.length > 0) og.images = filtered;
-      }
-    } catch (e) {
-      // ignore
-    }
+    og.images = images.length > 0 ? images : [primaryImage];
 
     if (!og.video) {
       const mobileUrls = [
