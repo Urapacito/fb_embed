@@ -3,50 +3,6 @@ import { normalizeUrl } from '../share/utils.js';
 export async function onRequest(context) {
   const { request } = context;
   const url = new URL(request.url);
-  const u = url.searchParams.get('u');
-  const r = url.searchParams.get('r') || '';
-  if (!u) return new Response('Missing video url', { status: 400 });
-
-  const raw = decodeURIComponent(u || '');
-  const cleaned = normalizeUrl(raw) || raw;
-  let upstream;
-  try {
-    upstream = new URL(cleaned);
-    if (!/^https?:\/\//i.test(upstream.toString())) throw new Error('invalid');
-  } catch (e) {
-    return new Response('Invalid video url', { status: 400 });
-  }
-
-  const headers = {
-    'User-Agent': request.headers.get('user-agent') || 'Mozilla/5.0',
-  };
-  if (r) headers['Referer'] = decodeURIComponent(r);
-  const range = request.headers.get('range');
-  if (range) headers['Range'] = range;
-
-  try {
-    const upstreamRes = await fetch(upstream.toString(), { method: 'GET', headers, redirect: 'follow' });
-    const respHeaders = new Headers();
-    const ct = upstreamRes.headers.get('content-type') || 'video/mp4';
-    respHeaders.set('Content-Type', ct);
-    const cl = upstreamRes.headers.get('content-length');
-    if (cl) respHeaders.set('Content-Length', cl);
-    const cr = upstreamRes.headers.get('content-range');
-    if (cr) respHeaders.set('Content-Range', cr);
-    const ar = upstreamRes.headers.get('accept-ranges');
-    if (ar) respHeaders.set('Accept-Ranges', ar);
-    respHeaders.set('Cache-Control', upstreamRes.headers.get('cache-control') || 'public, max-age=31536000, immutable');
-    respHeaders.set('Access-Control-Allow-Origin', '*');
-    respHeaders.set('Access-Control-Allow-Headers', 'Range');
-
-    return new Response(upstreamRes.body, { status: upstreamRes.status, headers: respHeaders });
-  } catch (e) {
-    return new Response('Video proxy failed', { status: 502 });
-  }
-}
-export async function onRequest(context) {
-  const { request } = context;
-  const url = new URL(request.url);
   const params = url.searchParams;
   const u = params.get('u');
   const r = params.get('r') || 'https://www.facebook.com/';
@@ -55,28 +11,30 @@ export async function onRequest(context) {
 
   let videoUrl;
   try {
-    // decode and ensure it's a valid URL
     videoUrl = decodeURIComponent(u);
+    videoUrl = normalizeUrl(videoUrl) || videoUrl;
     videoUrl = new URL(videoUrl).toString();
   } catch (e) {
     return new Response('Invalid "u" parameter', { status: 400 });
   }
 
-  // Basic hostname whitelist to avoid open proxy abuse
   const host = new URL(videoUrl).hostname || '';
   const ALLOWED_HOST_RE = /fbcdn\.net|fbsbx\.com|scontent\.|fbcdn\.com|fna\.fbcdn\.net|video\.|fhan\d*-|cdninstagram\.com/i;
   if (!ALLOWED_HOST_RE.test(host)) {
     return new Response('Host not allowed', { status: 403 });
   }
 
-  // Build upstream fetch headers; forward Range if provided
   const incoming = request.headers;
   const upstreamHeaders = new Headers();
   const range = incoming.get('range');
   if (range) upstreamHeaders.set('Range', range);
-  upstreamHeaders.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+  upstreamHeaders.set('User-Agent', incoming.get('user-agent') || 'Mozilla/5.0');
   upstreamHeaders.set('Accept', '*/*');
-  upstreamHeaders.set('Referer', decodeURIComponent(r));
+  try {
+    upstreamHeaders.set('Referer', decodeURIComponent(r));
+  } catch (e) {
+    upstreamHeaders.set('Referer', r);
+  }
 
   let upstream;
   try {
@@ -85,7 +43,6 @@ export async function onRequest(context) {
     return new Response('Upstream fetch failed', { status: 502 });
   }
 
-  // Forward useful headers back to the client
   const respHeaders = new Headers();
   const copyList = ['content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control', 'etag', 'last-modified', 'expires'];
   for (const h of copyList) {
