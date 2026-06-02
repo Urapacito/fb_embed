@@ -10,7 +10,8 @@ export async function onRequest(context) {
 
   const fbShort = normalizeUrl(fbUrl);
   const { og, error } = await scrapeFacebookEmbed(fbUrl, fbShort, context.env);
-  const html = buildEmbedHtml(og, fbShort);
+  const origin = new URL(request.url).origin;
+  const html = buildEmbedHtml(og, fbShort, origin);
 
   return new Response(JSON.stringify({
     error: error ? String(error) : null,

@@ -12,5 +12,8 @@
   "type": "module",
   "devDependencies": {
     "playwright": "^1.60.0"
+  },
+  "dependencies": {
+    "apify-client": "^2.23.3"
   }
 }
