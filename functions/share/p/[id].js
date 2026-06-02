@@ -7,7 +7,7 @@ export async function onRequest(context) {
 	const id = parts[parts.length - 1];
 	if (!id) return new Response('Invalid Facebook post path.', { status: 400 });
 
-	const fbShareUrl = `https://facebook.com/share/p/${encodeURIComponent(id)}/`;
+	const fbShareUrl = `https://www.facebook.com/share/p/${encodeURIComponent(id)}/`;
 	const fbUrl = fbShareUrl;
 	const fbShort = fbShareUrl;
 

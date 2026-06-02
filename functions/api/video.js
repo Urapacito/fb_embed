@@ -12,6 +12,28 @@ export async function onRequest(context) {
   let videoUrl;
   try {
     videoUrl = decodeURIComponent(u);
+
+    // If callers pasted an fbcdn URL directly into ?u= without URL-encoding
+    // its querystring, the browser will split those params into the outer
+    // request's search params. Reconstruct common fbcdn query params back
+    // into the video URL when the decoded value lacks its own querystring.
+    try {
+      const hasQuery = videoUrl.includes('?');
+      if (!hasQuery) {
+        const fbKeys = ['_nc_cat','_nc_sid','_nc_oc','_nc_ht','efg','ccb','oh','oe','bytestart','byteend','_nc_ohc','_nc_gid','_nc_zt','_nc_ss'];
+        const toAppend = [];
+        for (const [k, v] of params.entries()) {
+          if (k === 'u' || k === 'r') continue;
+          if (fbKeys.includes(k) || k.startsWith('_nc') || /^(oh|oe|efg|ccb|bytestart|byteend)$/i.test(k)) {
+            toAppend.push(`${encodeURIComponent(k)}=${encodeURIComponent(v)}`);
+          }
+        }
+        if (toAppend.length) videoUrl += '?' + toAppend.join('&');
+      }
+    } catch (e) {
+      // ignore reconstruction failures
+    }
+
     videoUrl = normalizeUrl(videoUrl) || videoUrl;
     videoUrl = new URL(videoUrl).toString();
   } catch (e) {

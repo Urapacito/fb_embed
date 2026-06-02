@@ -159,15 +159,16 @@ export function buildEmbedHtml(og, fbShort, origin = null) {
   <meta charset="UTF-8" />
   <title>${escapeHtml(titleDecoded)}</title>
   ${metaParts.join('\n  ')}
-  <style>body{font-family:Arial,Helvetica,sans-serif} .images{display:flex;flex-wrap:wrap;gap:8px}</style>
+  <style>body{font-family:Arial,Helvetica,sans-serif} .images{display:flex;flex-wrap:wrap;gap:8px} .fb-open{display:inline-block;margin:8px 0;padding:6px 10px;background:#1877f2;color:#fff;border-radius:6px;text-decoration:none}</style>
 </head>
 <body>
   <h2>${escapeHtml(titleDecoded)}</h2>
+  <p><a class="fb-open" href="${escapeHtml(fbShort)}" target="_blank" rel="noopener noreferrer">Open on Facebook</a></p>
   ${statsHtml}
   <p>${escapeHtml(descDecoded)}</p>
   ${firstImg ? `<img src="${escapeHtml(firstImg)}" alt="Post image" style="max-width:400px;display:block;" />` : ''}
   ${og.video ? `<video src="${escapeHtml(origin ? `${String(origin).replace(/\/$/, '')}/api/video?u=${encodeURIComponent(og.video)}&r=${encodeURIComponent(fbShort)}` : og.video)}" controls style="max-width:400px;display:block;"></video>` : ''}
-  <p><a href="${escapeHtml(fbShort)}" target="_blank">Watch on Facebook</a></p>
+  <p><a href="${escapeHtml(fbShort)}" target="_blank" rel="noopener noreferrer">Watch on Facebook</a></p>
 </body>
 </html>`;
 
